@@ -1,8 +1,9 @@
 import requests
 import os
 import json
-from datetime import datetime
 import time
+from datetime import datetime, timedelta
+import sys
 
 # ==================== گرفتن اطلاعات ====================
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
@@ -10,13 +11,14 @@ CHAT_ID = os.getenv("CHAT_ID")
 ETHERSCAN_API_KEY = os.getenv("ETHERSCAN_API_KEY")
 
 if not TELEGRAM_TOKEN or not CHAT_ID or not ETHERSCAN_API_KEY:
-    raise ValueError("❌ خطا: توکن، آیدی کانال یا کلید اتریوم در Secrets تنظیم نشده است.")
+    print("❌ خطا: توکن، آیدی کانال یا کلید اتریوم در Secrets تنظیم نشده است.")
+    sys.exit(1)
 
 # ==================== آدرس‌های API ====================
 TRENDING_METAS_URL = "https://api.dexscreener.com/metas/trending/v1"
 META_DETAILS_URL = "https://api.dexscreener.com/metas/meta/v1"
 
-# ==================== تنظیمات فیلترها ====================
+# ==================== تنظیمات ====================
 CONFIG = {
     "MIN_LIQUIDITY_DEX": 30000,
     "MIN_VOLUME_DEX": 5000,
@@ -24,12 +26,80 @@ CONFIG = {
     "MAX_CHANGE_24H": 500,
     "REPORT_COUNT": 5,
     "SUPPORTED_CHAINS": [
-    "ethereum", "eth", "bsc", "bnb", "arbitrum", 
-    "optimism", "polygon", "base", "linea", 
-    "avalanche", "fantom"
-
+        "ethereum", "eth", "bsc", "bnb", "arbitrum", 
+        "optimism", "polygon", "base", "linea", 
+        "avalanche", "fantom"
     ]
 }
+
+DB_PATH = "wallets_db.json"
+
+# ==================== توابع دیتابیس ====================
+
+def load_database():
+    """بارگذاری دیتابیس از فایل JSON"""
+    try:
+        if os.path.exists(DB_PATH):
+            with open(DB_PATH, 'r', encoding='utf-8') as f:
+                return json.load(f)
+        else:
+            return {"wallets": {}, "stats": {"total_wallets_tracked": 0, "whitelist_count": 0}}
+    except Exception as e:
+        print(f"❌ خطا در بارگذاری دیتابیس: {e}")
+        return {"wallets": {}, "stats": {"total_wallets_tracked": 0, "whitelist_count": 0}}
+
+def save_database(data):
+    """ذخیره دیتابیس در فایل JSON"""
+    try:
+        with open(DB_PATH, 'w', encoding='utf-8') as f:
+            json.dump(data, f, indent=2, ensure_ascii=False)
+        return True
+    except Exception as e:
+        print(f"❌ خطا در ذخیره دیتابیس: {e}")
+        return False
+
+def update_wallet(wallet_address, token_info, chain, price):
+    """اضافه کردن یا به‌روزرسانی یک کیف پول در دیتابیس"""
+    db = load_database()
+    now = datetime.utcnow().isoformat()
+    
+    if wallet_address not in db["wallets"]:
+        db["wallets"][wallet_address] = {
+            "address": wallet_address,
+            "chain": chain,
+            "first_seen": now,
+            "last_seen": now,
+            "trades": [],
+            "total_trades": 0,
+            "winning_trades": 0,
+            "total_profit_percent": 0,
+            "average_profit_percent": 0,
+            "score": 0,
+            "in_whitelist": False
+        }
+        db["stats"]["total_wallets_tracked"] += 1
+    
+    db["wallets"][wallet_address]["last_seen"] = now
+    db["wallets"][wallet_address]["trades"].append({
+        "token": token_info.get("symbol", "نامشخص"),
+        "token_name": token_info.get("name", "نامشخص"),
+        "buy_price": price,
+        "buy_date": now,
+        "status": "open"
+    })
+    db["wallets"][wallet_address]["total_trades"] += 1
+    
+    save_database(db)
+    return db
+
+def get_whitelist():
+    """دریافت لیست کیف پول‌های سفید"""
+    db = load_database()
+    whitelist = []
+    for address, data in db["wallets"].items():
+        if data.get("in_whitelist", False):
+            whitelist.append(address)
+    return whitelist
 
 # ==================== توابع ارسال پیام ====================
 
@@ -86,8 +156,6 @@ def is_valid_dex_token(token_info):
     chain = token_info.get("chain", "").lower()
     
     if chain not in CONFIG["SUPPORTED_CHAINS"]:
-        # این خط را غیرفعال کنید تا پیام نمایش داده نشود
-        # print(f"   ⏭️ [DEX] شبکه {chain} پشتیبانی نمی‌شود.")
         return False
     
     liquidity = token_info.get("liquidity", 0)
@@ -273,6 +341,15 @@ def get_first_buyers(contract_address, chain_name):
 
 def format_message(token, buyers=None):
     """ساخت پیام گزارش برای یک توکن"""
+    # گرفتن لیست سفید برای نمایش
+    whitelist = get_whitelist()
+    is_whitelisted = False
+    if buyers:
+        for buyer in buyers:
+            if buyer["address"] in whitelist:
+                is_whitelisted = True
+                break
+    
     message = f"""
 🦄 **ارز با خریدار اولیه شناسایی شد!**
 ▫️ نام: {token.get('name', 'نامشخص')} (${token.get('symbol', 'نامشخص')})
@@ -283,18 +360,21 @@ def format_message(token, buyers=None):
 ▫️ رشد ۲۴ ساعته: **{token.get('change_24h', 0):.2f}%** ✅
 ▫️ حجم معاملات: ${token.get('volume', 0):,.0f}
 ▫️ نقدینگی: ${token.get('liquidity', 0):,.0f}
-🔗 [مشاهده در DexScreener]({token.get('dex_url', '#')})
     """
     
+    if is_whitelisted:
+        message += "\n⭐ **این توکن توسط یک کیف پول سفید خریداری شده است!**"
+    
     if buyers:
-        message += "\n🐋 **کیف‌پول‌های خریدار اولیه (۵ نفر اول):**\n"
+        message += "\n\n🐋 **کیف‌پول‌های خریدار اولیه (۵ نفر اول):**\n"
         for i, buyer in enumerate(buyers[:5], 1):
             addr = buyer.get("address", "نامشخص")
             short_addr = addr[:6] + "..." + addr[-4:] if len(addr) > 10 else addr
             amount = buyer.get("amount", 0)
-            message += f"{i}. `{short_addr}` (مقدار: {amount:.2f} توکن)\n"
-    else:
-        message += "\n⚠️ خریدار اولیه‌ای پیدا نشد."
+            is_white = "⭐" if addr in whitelist else ""
+            message += f"{i}. `{short_addr}` (مقدار: {amount:.2f} توکن) {is_white}\n"
+    
+    message += f"\n🔗 [مشاهده در DexScreener]({token.get('dex_url', '#')})"
     
     return message
 
@@ -334,6 +414,14 @@ def main():
             buyers = get_first_buyers(contract, chain)
             
             if buyers:
+                # ذخیره کیف پول‌ها در دیتابیس
+                for buyer in buyers:
+                    update_wallet(
+                        wallet_address=buyer["address"],
+                        token_info=token,
+                        chain=chain,
+                        price=float(token.get("price", 0))
+                    )
                 valid_tokens.append((token, buyers))
                 print(f"✅ {token['symbol']} دارای {len(buyers)} خریدار اولیه است.")
             else:
@@ -354,6 +442,7 @@ def main():
         print("ℹ️ هیچ ارزی با خریدار اولیه پیدا نشد.")
         return
     
+    # نمایش ارزهای برتر
     print("\n🏆 ارزهای برتر با خریدار اولیه:")
     for i, (token, buyers) in enumerate(valid_tokens[:5], 1):
         change = float(token.get('change_24h', 0)) if token.get('change_24h') is not None else 0
