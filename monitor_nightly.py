@@ -199,4 +199,28 @@ def run_nightly_monitor():
     message = f"""
 🌙 **گزارش شبانه**
 
-📊 **آمار دیت
+📊 **آمار دیتابیس:**
+▫️ تعداد کل کیف پول‌ها: {len(wallets)}
+▫️ تعداد کیف پول‌های سفید: {whitelist_count}
+▫️ کیف پول‌های حذف شده: {removed_count}
+
+🏆 **۵ کیف پول برتر:**
+"""
+    # مرتب‌سازی بر اساس امتیاز و نمایش ۵ تا برتر
+    sorted_wallets = sorted(wallets.items(), key=lambda x: x[1].get("score", 0), reverse=True)
+    for i, (address, data) in enumerate(sorted_wallets[:5], 1):
+        score = data.get("score", 0)
+        trades = data.get("total_trades", 0)
+        chain = data.get("chain", "نامشخص")
+        short_addr = address[:8] + "..." + address[-6:]
+        message += f"{i}. `{short_addr}` ({chain}) - امتیاز: {score} - تعداد معاملات: {trades}\n"
+    
+    if TELEGRAM_TOKEN and CHAT_ID:
+        send_telegram_message(message)
+    
+    print("\n" + "="*60)
+    print(f"✅ فرآیند شبانه در {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} به پایان رسید.")
+    print("="*60)
+
+if __name__ == "__main__":
+    run_nightly_monitor()
