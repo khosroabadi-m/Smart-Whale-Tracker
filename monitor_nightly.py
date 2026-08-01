@@ -1,50 +1,211 @@
-import json
+import csv
 import os
 from datetime import datetime, timedelta
-import sys
 import requests
+import sys
 
-# ==================== گرفتن اطلاعات ====================
+# ==================== تنظیمات ====================
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 CHAT_ID = os.getenv("CHAT_ID")
-ETHERSCAN_API_KEY = os.getenv("ETHERSCAN_API_KEY")
 
-DB_PATH = "wallets_db.json"
-MAX_AGE_DAYS = 30  # نگهداری کیف پول به مدت ۳۰ روز
-MIN_SCORE_FOR_WHITELIST = 70  # حداقل امتیاز برای ورود به لیست سفید
+DATA_DIR = "data"
+WALLETS_FILE = os.path.join(DATA_DIR, "wallets.csv")
+TRADES_FILE = os.path.join(DATA_DIR, "trades.csv")
+SELLS_FILE = os.path.join(DATA_DIR, "sells.csv")
+WHITELIST_FILE = os.path.join(DATA_DIR, "whitelist.csv")
 
-# ==================== توابع دیتابیس ====================
+MAX_AGE_DAYS = 30
+MIN_SCORE_FOR_WHITELIST = 70
 
-def load_database():
-    """بارگذاری دیتابیس از فایل JSON"""
-    try:
-        if os.path.exists(DB_PATH):
-            with open(DB_PATH, 'r', encoding='utf-8') as f:
-                return json.load(f)
+# ==================== توابع CSV ====================
+
+def read_csv(file_path, headers):
+    if not os.path.exists(file_path):
+        return []
+    with open(file_path, 'r', encoding='utf-8') as f:
+        reader = csv.DictReader(f)
+        return list(reader)
+
+def write_csv(file_path, headers, data):
+    with open(file_path, 'w', encoding='utf-8', newline='') as f:
+        writer = csv.DictWriter(f, fieldnames=headers)
+        writer.writeheader()
+        writer.writerows(data)
+
+def get_wallet_headers():
+    return ["address", "chain", "first_seen", "last_seen", "total_trades",
+            "total_sells", "winning_sells", "losing_sells", "win_rate",
+            "avg_profit", "avg_hold_duration", "score", "in_whitelist"]
+
+def get_whitelist_headers():
+    return ["rank", "wallet_address", "chain", "score",
+            "total_trades", "win_rate", "avg_profit", "last_seen"]
+
+# ==================== محاسبه امتیاز ====================
+
+def calculate_score(wallet):
+    """محاسبه امتیاز کیف پول بر اساس فروش‌های انجام شده"""
+    total_trades = int(wallet.get("total_trades", 0))
+    total_sells = int(wallet.get("total_sells", 0))
+    winning_sells = int(wallet.get("winning_sells", 0))
+    
+    # اگر فروشی انجام نشده، امتیاز صفر است
+    if total_sells == 0:
+        return 0.0
+    
+    # ۱. نرخ برد
+    win_rate = (winning_sells / total_sells) * 100
+    
+    # ۲. میانگین سود (از sells.csv)
+    sells = read_csv(SELLS_FILE, ["sell_id", "trade_id", "wallet_address", "token",
+                                   "sell_price", "sell_date", "sell_percent",
+                                   "profit_percent", "is_winning", "hold_duration_hours"])
+    
+    wallet_sells = [s for s in sells if s.get("wallet_address") == wallet.get("address")]
+    total_profit = sum(float(s.get("profit_percent", 0)) for s in wallet_sells)
+    avg_profit = total_profit / total_sells if total_sells > 0 else 0
+    
+    # ۳. مدت زمان نگهداری
+    total_duration = sum(float(s.get("hold_duration_hours", 0)) for s in wallet_sells)
+    avg_duration = total_duration / total_sells if total_sells > 0 else 0
+    
+    # ۴. مدیریت سرمایه (تعداد فروش‌های جزئی)
+    partial_sells = sum(1 for s in wallet_sells if float(s.get("sell_percent", 0)) < 100)
+    capital_management_score = (partial_sells / total_trades) * 10 if total_trades > 0 else 0
+    
+    # ۵. امتیاز زمان‌بندی
+    timing_score = (avg_profit / (avg_duration + 1)) * 10 if avg_duration > 0 else 0
+    
+    # ۶. امتیاز نهایی
+    score = (win_rate * 0.45) + (avg_profit * 0.30) + (timing_score * 0.15) + (capital_management_score * 0.10)
+    
+    return round(score, 2)
+
+# ==================== به‌روزرسانی امتیازها ====================
+
+def update_all_scores():
+    """به‌روزرسانی امتیاز همه کیف پول‌ها"""
+    print("🔄 به‌روزرسانی امتیاز کیف پول‌ها...")
+    
+    wallets = read_csv(WALLETS_FILE, get_wallet_headers())
+    updated_count = 0
+    
+    for wallet in wallets:
+        score = calculate_score(wallet)
+        wallet["score"] = str(score)
+        
+        # بررسی ورود به لیست سفید
+        if score >= MIN_SCORE_FOR_WHITELIST and int(wallet.get("total_trades", 0)) >= 5:
+            wallet["in_whitelist"] = "TRUE"
         else:
-            return {"wallets": {}, "stats": {"total_wallets_tracked": 0, "whitelist_count": 0}}
-    except Exception as e:
-        print(f"❌ خطا در بارگذاری دیتابیس: {e}")
-        return {"wallets": {}, "stats": {"total_wallets_tracked": 0, "whitelist_count": 0}}
+            wallet["in_whitelist"] = "FALSE"
+        
+        updated_count += 1
+    
+    write_csv(WALLETS_FILE, get_wallet_headers(), wallets)
+    print(f"✅ امتیاز {updated_count} کیف پول به‌روز شد.")
 
-def save_database(data):
-    """ذخیره دیتابیس در فایل JSON"""
-    try:
-        with open(DB_PATH, 'w', encoding='utf-8') as f:
-            json.dump(data, f, indent=2, ensure_ascii=False)
-        return True
-    except Exception as e:
-        print(f"❌ خطا در ذخیره دیتابیس: {e}")
-        return False
+# ==================== پاکسازی کیف پول‌های قدیمی ====================
 
-# ==================== توابع ارسال پیام ====================
+def cleanup_old_wallets():
+    """حذف کیف پول‌هایی که بیش از ۳۰ روز فعال نبوده‌اند"""
+    print("\n🗑️ پاکسازی کیف پول‌های قدیمی...")
+    
+    wallets = read_csv(WALLETS_FILE, get_wallet_headers())
+    now = datetime.utcnow()
+    removed_count = 0
+    
+    active_wallets = []
+    for wallet in wallets:
+        last_seen = wallet.get("last_seen", "")
+        if last_seen:
+            try:
+                last_date = datetime.fromisoformat(last_seen)
+                if (now - last_date).days <= MAX_AGE_DAYS:
+                    active_wallets.append(wallet)
+                else:
+                    removed_count += 1
+                    print(f"🗑️ حذف کیف پول: {wallet.get('address', '')[:10]}...")
+            except:
+                active_wallets.append(wallet)
+        else:
+            active_wallets.append(wallet)
+    
+    write_csv(WALLETS_FILE, get_wallet_headers(), active_wallets)
+    print(f"✅ {removed_count} کیف پول قدیمی حذف شد.")
+    return len(active_wallets)
 
-def send_telegram_message(message):
-    """ارسال پیام به کانال تلگرام"""
+# ==================== به‌روزرسانی لیست سفید ====================
+
+def update_whitelist():
+    """به‌روزرسانی لیست سفید بر اساس کیف پول‌های با امتیاز بالا"""
+    print("\n⭐ به‌روزرسانی لیست سفید...")
+    
+    wallets = read_csv(WALLETS_FILE, get_wallet_headers())
+    
+    # فیلتر کیف پول‌های سفید
+    whitelist_wallets = [w for w in wallets if w.get("in_whitelist") == "TRUE"]
+    
+    # مرتب‌سازی بر اساس امتیاز
+    whitelist_wallets.sort(key=lambda x: float(x.get("score", 0)), reverse=True)
+    
+    # ذخیره لیست سفید
+    whitelist_data = []
+    for rank, wallet in enumerate(whitelist_wallets, 1):
+        whitelist_data.append({
+            "rank": str(rank),
+            "wallet_address": wallet.get("address", ""),
+            "chain": wallet.get("chain", ""),
+            "score": wallet.get("score", "0"),
+            "total_trades": wallet.get("total_trades", "0"),
+            "win_rate": wallet.get("win_rate", "0"),
+            "avg_profit": wallet.get("avg_profit", "0"),
+            "last_seen": wallet.get("last_seen", "")
+        })
+    
+    write_csv(WHITELIST_FILE, get_whitelist_headers(), whitelist_data)
+    print(f"✅ لیست سفید با {len(whitelist_data)} کیف پول به‌روز شد.")
+
+# ==================== ارسال گزارش شبانه ====================
+
+def send_nightly_report():
+    """ارسال گزارش شبانه به تلگرام"""
     if not TELEGRAM_TOKEN or not CHAT_ID:
         print("⚠️ اطلاعات تلگرام تنظیم نشده است.")
-        return False
+        return
     
+    wallets = read_csv(WALLETS_FILE, get_wallet_headers())
+    whitelist = read_csv(WHITELIST_FILE, get_whitelist_headers())
+    
+    # محاسبه آمار
+    total_wallets = len(wallets)
+    total_whitelist = len(whitelist)
+    total_trades = sum(int(w.get("total_trades", 0)) for w in wallets)
+    total_sells = sum(int(w.get("total_sells", 0)) for w in wallets)
+    
+    # ۵ کیف پول برتر
+    sorted_wallets = sorted(wallets, key=lambda x: float(x.get("score", 0)), reverse=True)
+    top_wallets = sorted_wallets[:5]
+    
+    message = f"""
+🌙 **گزارش شبانه**
+
+📊 **آمار کلی:**
+▫️ تعداد کل کیف پول‌ها: {total_wallets}
+▫️ تعداد کیف پول‌های سفید: {total_whitelist}
+▫️ مجموع معاملات: {total_trades}
+▫️ مجموع فروش‌ها: {total_sells}
+
+🏆 **۵ کیف پول برتر:**
+"""
+    
+    for i, wallet in enumerate(top_wallets, 1):
+        score = wallet.get("score", "0")
+        address = wallet.get("address", "")[:12] + "..."
+        trades = wallet.get("total_trades", "0")
+        message += f"{i}. `{address}` - امتیاز: {score} - معاملات: {trades}\n"
+    
+    # ارسال به تلگرام
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
     payload = {
         "chat_id": CHAT_ID,
@@ -52,175 +213,37 @@ def send_telegram_message(message):
         "parse_mode": "Markdown",
         "disable_web_page_preview": True
     }
+    
     try:
         response = requests.post(url, json=payload, timeout=10)
         response.raise_for_status()
-        print("✅ پیام شبانه با موفقیت ارسال شد.")
-        return True
+        print("✅ گزارش شبانه با موفقیت ارسال شد.")
     except Exception as e:
-        print(f"❌ خطا در ارسال پیام شبانه: {e}")
-        return False
+        print(f"❌ خطا در ارسال گزارش شبانه: {e}")
 
-# ==================== توابع اصلی ====================
+# ==================== تابع اصلی ====================
 
-def check_token_performance(contract_address, chain_name="ethereum"):
-    """بررسی عملکرد یک توکن برای محاسبه سود"""
-    if not ETHERSCAN_API_KEY:
-        return None
-    
-    chain_map = {
-        "ethereum": 1, "eth": 1, "bsc": 56, "bnb": 56,
-        "arbitrum": 42161, "optimism": 10, "polygon": 137,
-        "base": 8453, "linea": 59144
-    }
-    
-    chain_id_num = chain_map.get(chain_name.lower(), 1)
-    url = f"https://api.etherscan.io/v2/api?chainid={chain_id_num}&module=account&action=tokentx&contractaddress={contract_address}&sort=asc&apikey={ETHERSCAN_API_KEY}"
-    
-    try:
-        response = requests.get(url, timeout=10)
-        data = response.json()
-        if data.get("status") == "1":
-            return len(data.get("result", []))
-    except:
-        pass
-    return None
-
-def calculate_wallet_score(wallet_data):
-    """محاسبه امتیاز کیف پول بر اساس عملکرد"""
-    total_trades = wallet_data.get("total_trades", 0)
-    if total_trades == 0:
-        return 0
-    
-    # محاسبه نرخ برد (با فرض اینکه ۵۰٪ معاملات موفق باشند)
-    winning_trades = wallet_data.get("winning_trades", 0)
-    win_rate = (winning_trades / total_trades) * 100
-    
-    # محاسبه میانگین سود (با فرض اینکه ۱۰٪ متوسط سود باشد)
-    avg_profit = wallet_data.get("average_profit_percent", 10)
-    
-    # امتیاز ترکیبی
-    score = (win_rate * 0.6) + (avg_profit * 0.4)
-    
-    # پاداش برای تعداد معاملات بیشتر
-    if total_trades > 5:
-        score += 5
-    if total_trades > 10:
-        score += 10
-    if total_trades > 20:
-        score += 15
-    
-    return round(score, 2)
-
-def get_current_price(symbol):
-    """دریافت قیمت فعلی ارز (ساده شده)"""
-    # این تابع در نسخه کامل باید قیمت واقعی را از API بگیرد
-    # فعلاً یک قیمت فرضی برمی‌گرداند
-    return 0.001
-
-def run_nightly_monitor():
-    """اجرای فرآیند شبانه - امتیازدهی و پاکسازی"""
+def main():
+    """اجرای فرآیند شبانه"""
     print("="*60)
     print(f"🌙 شروع فرآیند شبانه در {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     print("="*60)
     
-    db = load_database()
-    wallets = db.get("wallets", {})
-    
-    if not wallets:
-        print("ℹ️ هیچ کیف پولی در دیتابیس وجود ندارد.")
-        return
-    
-    print(f"📊 تعداد کل کیف پول‌ها: {len(wallets)}")
-    
     # ۱. به‌روزرسانی امتیازها
-    print("\n🔄 به‌روزرسانی امتیاز کیف پول‌ها...")
-    updated_count = 0
-    whitelist_count = 0
+    update_all_scores()
     
-    for address, data in wallets.items():
-        # محاسبه امتیاز
-        score = calculate_wallet_score(data)
-        data["score"] = score
-        
-        # بررسی ورود به لیست سفید
-        if score >= MIN_SCORE_FOR_WHITELIST:
-            if not data.get("in_whitelist", False):
-                data["in_whitelist"] = True
-                print(f"⭐ کیف پول جدید در لیست سفید: {address[:10]}... (امتیاز: {score})")
-            whitelist_count += 1
-        else:
-            data["in_whitelist"] = False
-        
-        updated_count += 1
+    # ۲. پاکسازی کیف پول‌های قدیمی
+    cleanup_old_wallets()
     
-    db["stats"]["whitelist_count"] = whitelist_count
-    print(f"✅ امتیاز {updated_count} کیف پول به‌روز شد.")
-    print(f"⭐ تعداد کیف پول‌های سفید: {whitelist_count}")
+    # ۳. به‌روزرسانی لیست سفید
+    update_whitelist()
     
-    # ۲. حذف کیف پول‌های قدیمی (بیش از ۳۰ روز)
-    print("\n🗑️ حذف کیف پول‌های غیرفعال (بیش از ۳۰ روز)...")
-    now = datetime.utcnow()
-    removed_count = 0
-    old_wallets = []
-    
-    for address, data in wallets.items():
-        last_seen = data.get("last_seen", "")
-        if last_seen:
-            try:
-                last_date = datetime.fromisoformat(last_seen)
-                days_diff = (now - last_date).days
-                if days_diff > MAX_AGE_DAYS:
-                    old_wallets.append(address)
-                    removed_count += 1
-            except:
-                continue
-    
-    for address in old_wallets:
-        del wallets[address]
-        print(f"🗑️ حذف کیف پول: {address[:10]}... (غیرفعال بیش از {MAX_AGE_DAYS} روز)")
-    
-    if removed_count > 0:
-        print(f"✅ تعداد کیف پول‌های حذف شده: {removed_count}")
-        db["stats"]["total_wallets_tracked"] = len(wallets)
-    else:
-        print("ℹ️ هیچ کیف پول قدیمی برای حذف وجود ندارد.")
-    
-    # ۳. ذخیره دیتابیس
-    print("\n💾 ذخیره دیتابیس...")
-    if save_database(db):
-        print("✅ دیتابیس با موفقیت ذخیره شد.")
-    else:
-        print("❌ خطا در ذخیره دیتابیس.")
-        return
-    
-    # ۴. ارسال گزارش به تلگرام
-    print("\n📤 ارسال گزارش شبانه...")
-    message = f"""
-🌙 **گزارش شبانه**
-
-📊 **آمار دیتابیس:**
-▫️ تعداد کل کیف پول‌ها: {len(wallets)}
-▫️ تعداد کیف پول‌های سفید: {whitelist_count}
-▫️ کیف پول‌های حذف شده: {removed_count}
-
-🏆 **۵ کیف پول برتر:**
-"""
-    # مرتب‌سازی بر اساس امتیاز و نمایش ۵ تا برتر
-    sorted_wallets = sorted(wallets.items(), key=lambda x: x[1].get("score", 0), reverse=True)
-    for i, (address, data) in enumerate(sorted_wallets[:5], 1):
-        score = data.get("score", 0)
-        trades = data.get("total_trades", 0)
-        chain = data.get("chain", "نامشخص")
-        short_addr = address[:8] + "..." + address[-6:]
-        message += f"{i}. `{short_addr}` ({chain}) - امتیاز: {score} - تعداد معاملات: {trades}\n"
-    
-    if TELEGRAM_TOKEN and CHAT_ID:
-        send_telegram_message(message)
+    # ۴. ارسال گزارش شبانه
+    send_nightly_report()
     
     print("\n" + "="*60)
     print(f"✅ فرآیند شبانه در {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} به پایان رسید.")
     print("="*60)
 
 if __name__ == "__main__":
-    run_nightly_monitor()
+    main()
