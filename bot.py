@@ -1,11 +1,11 @@
 import requests
 import os
-import json
+import csv
 import time
-from datetime import datetime, timedelta
+from datetime import datetime
 import sys
 
-# ==================== گرفتن اطلاعات ====================
+# ==================== تنظیمات اولیه ====================
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 CHAT_ID = os.getenv("CHAT_ID")
 ETHERSCAN_API_KEY = os.getenv("ETHERSCAN_API_KEY")
@@ -14,11 +14,11 @@ if not TELEGRAM_TOKEN or not CHAT_ID or not ETHERSCAN_API_KEY:
     print("❌ خطا: توکن، آیدی کانال یا کلید اتریوم در Secrets تنظیم نشده است.")
     sys.exit(1)
 
-# ==================== آدرس‌های API ====================
+# آدرس‌های API
 TRENDING_METAS_URL = "https://api.dexscreener.com/metas/trending/v1"
 META_DETAILS_URL = "https://api.dexscreener.com/metas/meta/v1"
 
-# ==================== تنظیمات ====================
+# تنظیمات فیلترها
 CONFIG = {
     "MIN_LIQUIDITY_DEX": 30000,
     "MIN_VOLUME_DEX": 5000,
@@ -26,80 +26,186 @@ CONFIG = {
     "MAX_CHANGE_24H": 500,
     "REPORT_COUNT": 5,
     "SUPPORTED_CHAINS": [
-        "ethereum", "eth", "bsc", "bnb", "arbitrum", 
-        "optimism", "polygon", "base", "linea", 
+        "ethereum", "eth", "bsc", "bnb", "arbitrum",
+        "optimism", "polygon", "base", "linea",
         "avalanche", "fantom"
     ]
 }
 
-DB_PATH = "wallets_db.json"
+DATA_DIR = "data"
+WALLETS_FILE = os.path.join(DATA_DIR, "wallets.csv")
+TRADES_FILE = os.path.join(DATA_DIR, "trades.csv")
+SELLS_FILE = os.path.join(DATA_DIR, "sells.csv")
+WHITELIST_FILE = os.path.join(DATA_DIR, "whitelist.csv")
 
-# ==================== توابع دیتابیس ====================
+# ==================== توابع CSV ====================
 
-def load_database():
-    """بارگذاری دیتابیس از فایل JSON"""
-    try:
-        if os.path.exists(DB_PATH):
-            with open(DB_PATH, 'r', encoding='utf-8') as f:
-                return json.load(f)
-        else:
-            return {"wallets": {}, "stats": {"total_wallets_tracked": 0, "whitelist_count": 0}}
-    except Exception as e:
-        print(f"❌ خطا در بارگذاری دیتابیس: {e}")
-        return {"wallets": {}, "stats": {"total_wallets_tracked": 0, "whitelist_count": 0}}
+def ensure_data_dir():
+    """اطمینان از وجود پوشه data"""
+    if not os.path.exists(DATA_DIR):
+        os.makedirs(DATA_DIR)
 
-def save_database(data):
-    """ذخیره دیتابیس در فایل JSON"""
-    try:
-        with open(DB_PATH, 'w', encoding='utf-8') as f:
-            json.dump(data, f, indent=2, ensure_ascii=False)
-        return True
-    except Exception as e:
-        print(f"❌ خطا در ذخیره دیتابیس: {e}")
-        return False
+def read_csv(file_path, headers):
+    """خواندن فایل CSV و بازگشت لیست دیکشنری‌ها"""
+    ensure_data_dir()
+    if not os.path.exists(file_path):
+        return []
+    with open(file_path, 'r', encoding='utf-8') as f:
+        reader = csv.DictReader(f)
+        return list(reader)
 
-def update_wallet(wallet_address, token_info, chain, price):
-    """اضافه کردن یا به‌روزرسانی یک کیف پول در دیتابیس"""
-    db = load_database()
-    now = datetime.utcnow().isoformat()
+def write_csv(file_path, headers, data):
+    """نوشتن لیست دیکشنری‌ها در فایل CSV"""
+    ensure_data_dir()
+    with open(file_path, 'w', encoding='utf-8', newline='') as f:
+        writer = csv.DictWriter(f, fieldnames=headers)
+        writer.writeheader()
+        writer.writerows(data)
+
+def get_wallet(address):
+    """دریافت اطلاعات یک کیف پول از wallets.csv"""
+    data = read_csv(WALLETS_FILE, get_wallet_headers())
+    for row in data:
+        if row.get("address") == address:
+            return row
+    return None
+
+def update_wallet(wallet_data):
+    """به‌روزرسانی یا اضافه کردن کیف پول در wallets.csv"""
+    headers = get_wallet_headers()
+    data = read_csv(WALLETS_FILE, headers)
     
-    if wallet_address not in db["wallets"]:
-        db["wallets"][wallet_address] = {
-            "address": wallet_address,
-            "chain": chain,
-            "first_seen": now,
-            "last_seen": now,
-            "trades": [],
-            "total_trades": 0,
-            "winning_trades": 0,
-            "total_profit_percent": 0,
-            "average_profit_percent": 0,
-            "score": 0,
-            "in_whitelist": False
-        }
-        db["stats"]["total_wallets_tracked"] += 1
+    found = False
+    for i, row in enumerate(data):
+        if row.get("address") == wallet_data["address"]:
+            data[i] = wallet_data
+            found = True
+            break
     
-    db["wallets"][wallet_address]["last_seen"] = now
-    db["wallets"][wallet_address]["trades"].append({
+    if not found:
+        data.append(wallet_data)
+    
+    write_csv(WALLETS_FILE, headers, data)
+
+def get_wallet_headers():
+    return ["address", "chain", "first_seen", "last_seen", "total_trades",
+            "total_sells", "winning_sells", "losing_sells", "win_rate",
+            "avg_profit", "avg_hold_duration", "score", "in_whitelist"]
+
+def get_trades_headers():
+    return ["trade_id", "wallet_address", "token", "token_name",
+            "buy_price", "buy_date", "status", "total_sold_percent", "sell_ids"]
+
+def get_sells_headers():
+    return ["sell_id", "trade_id", "wallet_address", "token",
+            "sell_price", "sell_date", "sell_percent",
+            "profit_percent", "is_winning", "hold_duration_hours"]
+
+def get_whitelist_headers():
+    return ["rank", "wallet_address", "chain", "score",
+            "total_trades", "win_rate", "avg_profit", "last_seen"]
+
+def add_trade(wallet_address, token_info, price, chain):
+    """اضافه کردن یک معامله جدید به trades.csv"""
+    trade_id = f"trade_{int(time.time())}_{wallet_address[:8]}"
+    
+    trade_data = {
+        "trade_id": trade_id,
+        "wallet_address": wallet_address,
         "token": token_info.get("symbol", "نامشخص"),
         "token_name": token_info.get("name", "نامشخص"),
         "buy_price": price,
-        "buy_date": now,
-        "status": "open"
-    })
-    db["wallets"][wallet_address]["total_trades"] += 1
+        "buy_date": datetime.utcnow().isoformat(),
+        "status": "open",
+        "total_sold_percent": "0",
+        "sell_ids": ""
+    }
     
-    save_database(db)
-    return db
+    headers = get_trades_headers()
+    data = read_csv(TRADES_FILE, headers)
+    data.append(trade_data)
+    write_csv(TRADES_FILE, headers, data)
+    
+    # به‌روزرسانی کیف پول
+    wallet = get_wallet(wallet_address)
+    if wallet:
+        wallet["total_trades"] = str(int(wallet.get("total_trades", 0)) + 1)
+        wallet["last_seen"] = datetime.utcnow().isoformat()
+        update_wallet(wallet)
+    else:
+        new_wallet = {
+            "address": wallet_address,
+            "chain": chain,
+            "first_seen": datetime.utcnow().isoformat(),
+            "last_seen": datetime.utcnow().isoformat(),
+            "total_trades": "1",
+            "total_sells": "0",
+            "winning_sells": "0",
+            "losing_sells": "0",
+            "win_rate": "0",
+            "avg_profit": "0",
+            "avg_hold_duration": "0",
+            "score": "0",
+            "in_whitelist": "FALSE"
+        }
+        update_wallet(new_wallet)
+    
+    return trade_id
 
-def get_whitelist():
-    """دریافت لیست کیف پول‌های سفید"""
-    db = load_database()
-    whitelist = []
-    for address, data in db["wallets"].items():
-        if data.get("in_whitelist", False):
-            whitelist.append(address)
-    return whitelist
+def add_sell(trade_id, wallet_address, token, sell_price, sell_percent, profit_percent, is_winning, hold_duration):
+    """اضافه کردن یک فروش جدید به sells.csv"""
+    sell_id = f"sell_{int(time.time())}_{wallet_address[:8]}"
+    
+    sell_data = {
+        "sell_id": sell_id,
+        "trade_id": trade_id,
+        "wallet_address": wallet_address,
+        "token": token,
+        "sell_price": str(sell_price),
+        "sell_date": datetime.utcnow().isoformat(),
+        "sell_percent": str(sell_percent),
+        "profit_percent": str(profit_percent),
+        "is_winning": "TRUE" if is_winning else "FALSE",
+        "hold_duration_hours": str(hold_duration)
+    }
+    
+    headers = get_sells_headers()
+    data = read_csv(SELLS_FILE, headers)
+    data.append(sell_data)
+    write_csv(SELLS_FILE, headers, data)
+    
+    # به‌روزرسانی کیف پول
+    wallet = get_wallet(wallet_address)
+    if wallet:
+        wallet["total_sells"] = str(int(wallet.get("total_sells", 0)) + 1)
+        if is_winning:
+            wallet["winning_sells"] = str(int(wallet.get("winning_sells", 0)) + 1)
+        else:
+            wallet["losing_sells"] = str(int(wallet.get("losing_sells", 0)) + 1)
+        wallet["last_seen"] = datetime.utcnow().isoformat()
+        update_wallet(wallet)
+    
+    # به‌روزرسانی trade
+    trades = read_csv(TRADES_FILE, get_trades_headers())
+    for trade in trades:
+        if trade.get("trade_id") == trade_id:
+            current_sold = float(trade.get("total_sold_percent", 0))
+            new_sold = current_sold + sell_percent
+            trade["total_sold_percent"] = str(min(new_sold, 100))
+            
+            sell_ids = trade.get("sell_ids", "")
+            if sell_ids:
+                trade["sell_ids"] = sell_ids + ";" + sell_id
+            else:
+                trade["sell_ids"] = sell_id
+            
+            if new_sold >= 100:
+                trade["status"] = "closed"
+            else:
+                trade["status"] = "partially_sold"
+            break
+    
+    write_csv(TRADES_FILE, get_trades_headers(), trades)
 
 # ==================== توابع ارسال پیام ====================
 
@@ -337,75 +443,77 @@ def get_first_buyers(contract_address, chain_name):
         print(f"ℹ️ شبکه {chain} پشتیبانی نمی‌شود.")
         return []
 
-# ==================== ساخت پیام گزارش ====================
+# ==================== توابع تشخیص فروش (قسمت جدید) ====================
 
-def format_message(token, buyers=None):
-    """ساخت پیام گزارش برای یک توکن"""
-    # گرفتن لیست سفید برای نمایش
-    whitelist = get_whitelist()
-    is_whitelisted = False
-    if buyers:
-        for buyer in buyers:
-            if buyer["address"] in whitelist:
-                is_whitelisted = True
-                break
+def check_sell(wallet_address, token, buy_price, buy_date, trade_id):
+    """بررسی اینکه آیا کیف پول ارز را فروخته است یا خیر"""
+    # این تابع باید قیمت فعلی را با قیمت خرید مقایسه کند
+    # و در صورت تشخیص فروش، تابع add_sell را صدا بزند
+    # فعلاً یک نمونه ساده
     
-    message = f"""
-🦄 **ارز با خریدار اولیه شناسایی شد!**
-▫️ نام: {token.get('name', 'نامشخص')} (${token.get('symbol', 'نامشخص')})
-▫️ شبکه: {token.get('chain', 'نامشخص')}
-▫️ دسته‌بندی: {token.get('meta_name', 'نامشخص')}
-▫️ صرافی: {token.get('dex', 'نامشخص')}
-▫️ قیمت: ${float(token.get('price', 0)):,.4f}
-▫️ رشد ۲۴ ساعته: **{token.get('change_24h', 0):.2f}%** ✅
-▫️ حجم معاملات: ${token.get('volume', 0):,.0f}
-▫️ نقدینگی: ${token.get('liquidity', 0):,.0f}
-    """
+    # دریافت قیمت فعلی از DexScreener (ساده شده)
+    try:
+        url = f"https://api.dexscreener.com/latest/dex/search?q={token}"
+        response = requests.get(url, timeout=10)
+        data = response.json()
+        
+        if data.get("pairs"):
+            current_price = float(data["pairs"][0].get("priceUsd", 0))
+            
+            # محاسبه سود
+            profit_percent = ((current_price - buy_price) / buy_price) * 100
+            
+            # اگر سود به ۲۰٪ رسید، معامله را ببند (نمونه)
+            if profit_percent >= 20:
+                # محاسبه مدت زمان نگهداری
+                buy_time = datetime.fromisoformat(buy_date.replace('Z', '+00:00'))
+                now = datetime.utcnow()
+                hold_duration = (now - buy_time).total_seconds() / 3600
+                
+                add_sell(
+                    trade_id=trade_id,
+                    wallet_address=wallet_address,
+                    token=token,
+                    sell_price=current_price,
+                    sell_percent=100,  # فرض می‌کنیم کل ارز را می‌فروشد
+                    profit_percent=profit_percent,
+                    is_winning=True,
+                    hold_duration=hold_duration
+                )
+                return True
+    except Exception as e:
+        print(f"⚠️ خطا در بررسی فروش برای {token}: {e}")
     
-    if is_whitelisted:
-        message += "\n⭐ **این توکن توسط یک کیف پول سفید خریداری شده است!**"
-    
-    if buyers:
-        message += "\n\n🐋 **کیف‌پول‌های خریدار اولیه (۵ نفر اول):**\n"
-        for i, buyer in enumerate(buyers[:5], 1):
-            addr = buyer.get("address", "نامشخص")
-            short_addr = addr[:6] + "..." + addr[-4:] if len(addr) > 10 else addr
-            amount = buyer.get("amount", 0)
-            is_white = "⭐" if addr in whitelist else ""
-            message += f"{i}. `{short_addr}` (مقدار: {amount:.2f} توکن) {is_white}\n"
-    
-    message += f"\n🔗 [مشاهده در DexScreener]({token.get('dex_url', '#')})"
-    
-    return message
+    return False
 
 # ==================== تابع اصلی ====================
 
 def main():
-    """تابع اصلی ربات - فقط ارزهای با خریدار اولیه"""
+    """تابع اصلی ربات"""
     print("\n" + "="*60)
     print(f"⏳ شروع اسکن جدید در {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     print("="*60)
     
     start_time = time.time()
     
-    # ۱. دریافت از DexScreener
-    dex_gainers = get_gainers_from_dex()
+    # ۱. اسکن بازار و پیدا کردن ارزهای با رشد بالا
+    gainers = get_gainers_from_dex()
     
-    if not dex_gainers:
-        print("ℹ️ هیچ ارز DEX باکیفیتی پیدا نشد.")
+    if not gainers:
+        print("ℹ️ هیچ ارز با رشد بالا پیدا نشد.")
         return
     
     # ۲. مرتب‌سازی بر اساس رشد
-    dex_gainers.sort(key=lambda x: float(x.get('change_24h', 0)) if x.get('change_24h') is not None else 0, reverse=True)
+    gainers.sort(key=lambda x: float(x.get('change_24h', 0)), reverse=True)
     
     # ۳. پیدا کردن خریداران اولیه
     print("\n" + "="*60)
-    print("🔍 بررسی خریداران اولیه برای هر ارز")
+    print("🔍 بررسی خریداران اولیه")
     print("="*60)
     
     valid_tokens = []
     
-    for token in dex_gainers:
+    for token in gainers[:10]:  # فقط ۱۰ ارز برتر برای بررسی
         contract = token.get("contract", "")
         chain = token.get("chain", "")
         
@@ -414,14 +522,24 @@ def main():
             buyers = get_first_buyers(contract, chain)
             
             if buyers:
-                # ذخیره کیف پول‌ها در دیتابیس
                 for buyer in buyers:
-                    update_wallet(
+                    # ذخیره معامله
+                    trade_id = add_trade(
                         wallet_address=buyer["address"],
                         token_info=token,
-                        chain=chain,
-                        price=float(token.get("price", 0))
+                        price=float(token.get("price", 0)),
+                        chain=chain
                     )
+                    
+                    # بررسی فروش (با قیمت فعلی)
+                    check_sell(
+                        wallet_address=buyer["address"],
+                        token=token.get("symbol", ""),
+                        buy_price=float(token.get("price", 0)),
+                        buy_date=datetime.utcnow().isoformat(),
+                        trade_id=trade_id
+                    )
+                    
                 valid_tokens.append((token, buyers))
                 print(f"✅ {token['symbol']} دارای {len(buyers)} خریدار اولیه است.")
             else:
@@ -434,46 +552,30 @@ def main():
     print("📊 گزارش نهایی")
     print("="*60)
     
-    print(f"📊 تعداد کل ارزهای DEX باکیفیت: {len(dex_gainers)}")
+    print(f"📊 تعداد کل ارزهای باکیفیت: {len(gainers)}")
     print(f"✅ تعداد ارزهای با خریدار اولیه: {len(valid_tokens)}")
-    print(f"⏭️ تعداد ارزهای بدون خریدار: {len(dex_gainers) - len(valid_tokens)}")
     
-    if not valid_tokens:
-        print("ℹ️ هیچ ارزی با خریدار اولیه پیدا نشد.")
-        return
-    
-    # نمایش ارزهای برتر
-    print("\n🏆 ارزهای برتر با خریدار اولیه:")
-    for i, (token, buyers) in enumerate(valid_tokens[:5], 1):
-        change = float(token.get('change_24h', 0)) if token.get('change_24h') is not None else 0
-        print(f"   {i}. {token['symbol']} ({token['chain']}) - رشد: {change:.2f}% - تعداد خریدار: {len(buyers)}")
-    
-    # ۵. ارسال گزارش
-    report_count = min(CONFIG["REPORT_COUNT"], len(valid_tokens))
-    print(f"\n📨 در حال ارسال گزارش برای {report_count} ارز با خریدار اولیه...")
-    
-    success_count = 0
-    for i, (token, buyers) in enumerate(valid_tokens[:report_count], 1):
-        print(f"\n--- گزارش {i}: {token['symbol']} ---")
-        message = format_message(token, buyers)
-        if send_telegram_message(message):
-            success_count += 1
-            print(f"✅ گزارش {token['symbol']} با موفقیت ارسال شد.")
-        else:
-            print(f"❌ ارسال گزارش {token['symbol']} ناموفق بود.")
+    # ۵. ارسال گزارش به تلگرام
+    report_count = min(5, len(valid_tokens))
+    if report_count > 0:
+        print(f"\n📨 در حال ارسال {report_count} گزارش به تلگرام...")
         
-        if i < report_count:
+        for i, (token, buyers) in enumerate(valid_tokens[:report_count], 1):
+            message = f"""
+🦄 **ارز با خریدار اولیه شناسایی شد!**
+▫️ نام: {token.get('name', 'نامشخص')} (${token.get('symbol', 'نامشخص')})
+▫️ شبکه: {token.get('chain', 'نامشخص')}
+▫️ رشد ۲۴ ساعته: **{token.get('change_24h', 0):.2f}%** ✅
+▫️ تعداد خریداران اولیه: {len(buyers)}
+🔗 [مشاهده در DexScreener]({token.get('dex_url', '#')})
+            """
+            
+            send_telegram_message(message)
             time.sleep(2)
     
-    # ۶. گزارش نهایی
     elapsed_time = time.time() - start_time
-    print("\n" + "="*60)
-    print(f"✅ فرآیند اسکن و گزارش‌دهی در {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} به پایان رسید.")
+    print(f"\n✅ فرآیند در {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} به پایان رسید.")
     print(f"⏱️ زمان اجرا: {elapsed_time:.2f} ثانیه")
-    print(f"📊 تعداد کل ارزهای DEX باکیفیت: {len(dex_gainers)}")
-    print(f"✅ تعداد ارزهای با خریدار اولیه: {len(valid_tokens)}")
-    print(f"📨 تعداد گزارش‌های ارسال شده: {success_count}")
-    print("="*60)
 
 if __name__ == "__main__":
     main()
