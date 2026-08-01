@@ -60,7 +60,7 @@
       "winning_trades": 0,
       "total_profit_percent": 0,
       "average_profit_percent": 0,
-      "score": 0,
+      "score": 5.0,
       "in_whitelist": false
     },
     "0xaa4f58e9aafd36b4b6446f6dc417c02908641a7c": {
@@ -88,7 +88,7 @@
       "winning_trades": 0,
       "total_profit_percent": 0,
       "average_profit_percent": 0,
-      "score": 0,
+      "score": 0.0,
       "in_whitelist": false
     },
     "0x26e550ac11b26f78a04489d5f20f24e3559f7dd9": {
@@ -116,7 +116,7 @@
       "winning_trades": 0,
       "total_profit_percent": 0,
       "average_profit_percent": 0,
-      "score": 0,
+      "score": 0.0,
       "in_whitelist": false
     },
     "0xfff8d5fff6ee3226fa2f5d7d5d8c3ff785be9c74": {
@@ -144,7 +144,7 @@
       "winning_trades": 0,
       "total_profit_percent": 0,
       "average_profit_percent": 0,
-      "score": 0,
+      "score": 0.0,
       "in_whitelist": false
     },
     "0xeec2c05c9c331b66e1c25b1b9cdeb705cca58893": {
@@ -172,7 +172,7 @@
       "winning_trades": 0,
       "total_profit_percent": 0,
       "average_profit_percent": 0,
-      "score": 0,
+      "score": 0.0,
       "in_whitelist": false
     },
     "0x034d2beef836a0d102c2124298b45ec5ce9c536e": {
@@ -200,7 +200,7 @@
       "winning_trades": 0,
       "total_profit_percent": 0,
       "average_profit_percent": 0,
-      "score": 0,
+      "score": 0.0,
       "in_whitelist": false
     },
     "0x12419a0427c2a27a61c1cb4a49f5fad24fd4e671": {
@@ -228,7 +228,7 @@
       "winning_trades": 0,
       "total_profit_percent": 0,
       "average_profit_percent": 0,
-      "score": 0,
+      "score": 0.0,
       "in_whitelist": false
     },
     "0x86ce2637f272a2972b0652492c4830458d008d29": {
@@ -256,7 +256,7 @@
       "winning_trades": 0,
       "total_profit_percent": 0,
       "average_profit_percent": 0,
-      "score": 0,
+      "score": 0.0,
       "in_whitelist": false
     },
     "0xe64be7873656146fb3866bf82d058da8e073cd09": {
@@ -284,7 +284,7 @@
       "winning_trades": 0,
       "total_profit_percent": 0,
       "average_profit_percent": 0,
-      "score": 0,
+      "score": 0.0,
       "in_whitelist": false
     },
     "0x055751c87b1caa5c3c3b95681bb275456f022278": {
@@ -312,7 +312,7 @@
       "winning_trades": 0,
       "total_profit_percent": 0,
       "average_profit_percent": 0,
-      "score": 0,
+      "score": 0.0,
       "in_whitelist": false
     },
     "0xf280b16ef293d8e534e370794ef26bf312694126": {
@@ -340,7 +340,7 @@
       "winning_trades": 0,
       "total_profit_percent": 0,
       "average_profit_percent": 0,
-      "score": 0,
+      "score": 0.0,
       "in_whitelist": false
     },
     "0x76a411f14a704099ba476ce8dffc288a53295218": {
@@ -368,7 +368,7 @@
       "winning_trades": 0,
       "total_profit_percent": 0,
       "average_profit_percent": 0,
-      "score": 0,
+      "score": 0.0,
       "in_whitelist": false
     },
     "0x13379484d6e4cb42794e71d14774953b29e6743a": {
@@ -396,7 +396,7 @@
       "winning_trades": 0,
       "total_profit_percent": 0,
       "average_profit_percent": 0,
-      "score": 0,
+      "score": 0.0,
       "in_whitelist": false
     },
     "0xc165e8c1e3ee6878987b8a26a50efe8dde4d352a": {
@@ -417,7 +417,7 @@
       "winning_trades": 0,
       "total_profit_percent": 0,
       "average_profit_percent": 0,
-      "score": 0,
+      "score": 0.0,
       "in_whitelist": false
     },
     "0xc114cf69972e3c1b4b529e0418012c01fcf9e725": {
@@ -438,7 +438,7 @@
       "winning_trades": 0,
       "total_profit_percent": 0,
       "average_profit_percent": 0,
-      "score": 0,
+      "score": 0.0,
       "in_whitelist": false
     },
     "0xf15b73e7f5edcfc0d91da289c21d9af89cf377ce": {
@@ -459,7 +459,7 @@
       "winning_trades": 0,
       "total_profit_percent": 0,
       "average_profit_percent": 0,
-      "score": 0,
+      "score": 0.0,
       "in_whitelist": false
     },
     "0xb2a6103057583b927b4066efc65de15cfe0ae157": {
@@ -480,7 +480,7 @@
       "winning_trades": 0,
       "total_profit_percent": 0,
       "average_profit_percent": 0,
-      "score": 0,
+      "score": 0.0,
       "in_whitelist": false
     }
   },
