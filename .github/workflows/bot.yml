@@ -2,15 +2,14 @@ name: Crypto Wallet Bot
 
 on:
   schedule:
-    # هر ساعت، از ساعت ۲ تا ۲۰ UTC (معادل ۶ صبح تا ۱۲:۳۰ شب تهران)
-    - cron: "30 2-20 * * *"
-  workflow_dispatch:  # اجرای دستی
+    - cron: "30 2-20 * * *"  # هر ساعت، از ۶ صبح تا ۱۲:۳۰ شب تهران
+  workflow_dispatch:
 
 jobs:
   run-bot:
     runs-on: ubuntu-latest
     permissions:
-      contents: write  # برای ذخیره دیتابیس در مخزن
+      contents: write
 
     steps:
       - name: Checkout repo
@@ -35,11 +34,11 @@ jobs:
           ETHERSCAN_API_KEY: ${{ secrets.ETHERSCAN_API_KEY }}
         run: python bot.py
 
-      - name: Commit changes (update database)
+      - name: Commit changes
         uses: stefanzweifel/git-auto-commit-action@v5
         with:
-          commit_message: "Auto-update: wallet database"
-          file_pattern: wallets_db.json
+          commit_message: "Auto-update: CSV database"
+          file_pattern: data/*.csv
           skip_dirty_check: false
           skip_fetch: false
           push_options: '--force-with-lease'
