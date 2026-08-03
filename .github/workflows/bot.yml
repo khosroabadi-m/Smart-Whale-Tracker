@@ -2,7 +2,7 @@ name: Crypto Wallet Bot
 
 on:
   schedule:
-    - cron: "30 2-20 * * *"  # هر ساعت، از ۶ صبح تا ۱۲:۳۰ شب تهران
+    - cron: "30 2-20 * * *"
   workflow_dispatch:
 
 jobs:
@@ -32,6 +32,7 @@ jobs:
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
           CHAT_ID: ${{ secrets.CHAT_ID }}
           ETHERSCAN_API_KEY: ${{ secrets.ETHERSCAN_API_KEY }}
+          BSCSCAN_API_KEY: ${{ secrets.BSCSCAN_API_KEY }}  # ← این خط اضافه شد
         run: python bot.py
 
       - name: Commit changes
