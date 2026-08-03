@@ -18,17 +18,20 @@ if not TELEGRAM_TOKEN or not CHAT_ID or not ETHERSCAN_API_KEY:
 TRENDING_METAS_URL = "https://api.dexscreener.com/metas/trending/v1"
 META_DETAILS_URL = "https://api.dexscreener.com/metas/meta/v1"
 
-# تنظیمات فیلترها
+# ==================== تنظیمات فیلترها (گسترش یافته) ====================
 CONFIG = {
     "MIN_LIQUIDITY_DEX": 30000,
     "MIN_VOLUME_DEX": 5000,
-    "MIN_CHANGE_24H": 10,
-    "MAX_CHANGE_24H": 500,
-    "REPORT_COUNT": 5,
+    "MIN_CHANGE_24H": 10,          # حداقل رشد توکن
+    "MAX_CHANGE_24H": 500,         # حداکثر رشد معقول
+    "REPORT_COUNT": 5,             # تعداد گزارش‌های ارسال شده
+    "MAX_CATEGORIES": 10,          # ← افزایش از ۵ به ۱۰
+    "INCLUDE_SOLANA": True,        # ← اضافه شدن سولانا
     "SUPPORTED_CHAINS": [
         "ethereum", "eth", "bsc", "bnb", "arbitrum",
         "optimism", "polygon", "base", "linea",
-        "avalanche", "fantom"
+        "avalanche", "fantom",
+        "solana", "sol"            # ← سولانا اضافه شد
     ]
 }
 
@@ -41,12 +44,10 @@ WHITELIST_FILE = os.path.join(DATA_DIR, "whitelist.csv")
 # ==================== توابع CSV ====================
 
 def ensure_data_dir():
-    """اطمینان از وجود پوشه data"""
     if not os.path.exists(DATA_DIR):
         os.makedirs(DATA_DIR)
 
 def read_csv(file_path, headers):
-    """خواندن فایل CSV و بازگشت لیست دیکشنری‌ها"""
     ensure_data_dir()
     if not os.path.exists(file_path):
         return []
@@ -55,7 +56,6 @@ def read_csv(file_path, headers):
         return list(reader)
 
 def write_csv(file_path, headers, data):
-    """نوشتن لیست دیکشنری‌ها در فایل CSV"""
     ensure_data_dir()
     with open(file_path, 'w', encoding='utf-8', newline='') as f:
         writer = csv.DictWriter(f, fieldnames=headers)
@@ -63,7 +63,6 @@ def write_csv(file_path, headers, data):
         writer.writerows(data)
 
 def get_wallet(address):
-    """دریافت اطلاعات یک کیف پول از wallets.csv"""
     data = read_csv(WALLETS_FILE, get_wallet_headers())
     for row in data:
         if row.get("address") == address:
@@ -71,7 +70,6 @@ def get_wallet(address):
     return None
 
 def update_wallet(wallet_data):
-    """به‌روزرسانی یا اضافه کردن کیف پول در wallets.csv"""
     headers = get_wallet_headers()
     data = read_csv(WALLETS_FILE, headers)
     
@@ -106,7 +104,6 @@ def get_whitelist_headers():
             "total_trades", "win_rate", "avg_profit", "last_seen"]
 
 def add_trade(wallet_address, token_info, price, chain):
-    """اضافه کردن یک معامله جدید به trades.csv"""
     trade_id = f"trade_{int(time.time())}_{wallet_address[:8]}"
     
     trade_data = {
@@ -114,7 +111,7 @@ def add_trade(wallet_address, token_info, price, chain):
         "wallet_address": wallet_address,
         "token": token_info.get("symbol", "نامشخص"),
         "token_name": token_info.get("name", "نامشخص"),
-        "buy_price": price,
+        "buy_price": str(price),
         "buy_date": datetime.utcnow().isoformat(),
         "status": "open",
         "total_sold_percent": "0",
@@ -126,7 +123,6 @@ def add_trade(wallet_address, token_info, price, chain):
     data.append(trade_data)
     write_csv(TRADES_FILE, headers, data)
     
-    # به‌روزرسانی کیف پول
     wallet = get_wallet(wallet_address)
     if wallet:
         wallet["total_trades"] = str(int(wallet.get("total_trades", 0)) + 1)
@@ -153,7 +149,6 @@ def add_trade(wallet_address, token_info, price, chain):
     return trade_id
 
 def add_sell(trade_id, wallet_address, token, sell_price, sell_percent, profit_percent, is_winning, hold_duration):
-    """اضافه کردن یک فروش جدید به sells.csv"""
     sell_id = f"sell_{int(time.time())}_{wallet_address[:8]}"
     
     sell_data = {
@@ -174,7 +169,6 @@ def add_sell(trade_id, wallet_address, token, sell_price, sell_percent, profit_p
     data.append(sell_data)
     write_csv(SELLS_FILE, headers, data)
     
-    # به‌روزرسانی کیف پول
     wallet = get_wallet(wallet_address)
     if wallet:
         wallet["total_sells"] = str(int(wallet.get("total_sells", 0)) + 1)
@@ -185,7 +179,6 @@ def add_sell(trade_id, wallet_address, token, sell_price, sell_percent, profit_p
         wallet["last_seen"] = datetime.utcnow().isoformat()
         update_wallet(wallet)
     
-    # به‌روزرسانی trade
     trades = read_csv(TRADES_FILE, get_trades_headers())
     for trade in trades:
         if trade.get("trade_id") == trade_id:
@@ -210,7 +203,6 @@ def add_sell(trade_id, wallet_address, token, sell_price, sell_percent, profit_p
 # ==================== توابع ارسال پیام ====================
 
 def send_telegram_message(message):
-    """ارسال پیام به کانال تلگرام"""
     print("📤 در حال ارسال پیام به تلگرام...")
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
     payload = {
@@ -231,7 +223,6 @@ def send_telegram_message(message):
 # ==================== توابع دریافت از DexScreener ====================
 
 def get_trending_metas():
-    """دریافت لیست دسته‌بندی‌های داغ از DexScreener"""
     print("🔍 [DEX-۱] دریافت لیست دسته‌بندی‌های داغ از DexScreener...")
     try:
         response = requests.get(TRENDING_METAS_URL, timeout=10)
@@ -244,7 +235,6 @@ def get_trending_metas():
         return []
 
 def get_tokens_from_meta(slug):
-    """دریافت لیست توکن‌های یک دسته‌بندی خاص از DexScreener"""
     try:
         url = f"{META_DETAILS_URL}/{slug}"
         response = requests.get(url, timeout=10)
@@ -258,7 +248,6 @@ def get_tokens_from_meta(slug):
         return []
 
 def is_valid_dex_token(token_info):
-    """بررسی کیفیت توکن DEX با فیلترهای مختلف"""
     chain = token_info.get("chain", "").lower()
     
     if chain not in CONFIG["SUPPORTED_CHAINS"]:
@@ -286,9 +275,8 @@ def is_valid_dex_token(token_info):
     return True
 
 def get_gainers_from_dex():
-    """پیدا کردن ارزهای با رشد بالا از DexScreener"""
     print("="*60)
-    print("🚀 [DEX] شروع جستجو در صرافی‌های غیرمتمرکز")
+    print("🚀 [DEX] شروع جستجو در صرافی‌های غیرمتمرکز (گسترش یافته)")
     print("="*60)
     
     metas = get_trending_metas()
@@ -296,31 +284,34 @@ def get_gainers_from_dex():
         print("❌ [DEX] هیچ دسته‌بندی داغی پیدا نشد.")
         return []
     
+    # ===== تغییر ۱: حذف فیلتر رشد دسته‌بندی =====
     top_metas = []
     for meta in metas:
-        change_24h = meta.get("marketCapChange", {}).get("h24", 0)
-        if change_24h >= 3:
-            top_metas.append({
-                "slug": meta.get("slug"),
-                "name": meta.get("name", "نامشخص"),
-                "change_24h": change_24h
-            })
+        top_metas.append({
+            "slug": meta.get("slug"),
+            "name": meta.get("name", "نامشخص"),
+            "change_24h": meta.get("marketCapChange", {}).get("h24", 0)
+        })
     
-    print(f"📊 [DEX] تعداد دسته‌بندی‌های با رشد +۳٪: {len(top_metas)}")
+    print(f"📊 [DEX] تعداد کل دسته‌بندی‌ها: {len(top_metas)}")
     
     if not top_metas:
-        print("ℹ️ [DEX] هیچ دسته‌بندی با رشد بالا پیدا نشد.")
+        print("ℹ️ [DEX] هیچ دسته‌بندی یافت نشد.")
         return []
     
+    # نمایش ۱۰ دسته‌بندی برتر (بر اساس رشد)
     print("\n🏆 [DEX] دسته‌بندی‌های برتر:")
-    for i, meta in enumerate(top_metas[:5], 1):
+    sorted_metas = sorted(top_metas, key=lambda x: x["change_24h"], reverse=True)
+    for i, meta in enumerate(sorted_metas[:10], 1):
         print(f"   {i}. {meta['name']} (رشد دسته: {meta['change_24h']:.2f}%)")
     
+    # ===== تغییر ۲: افزایش تعداد دسته‌بندی‌ها از ۵ به ۱۰ =====
     all_gainers = []
     seen_tokens = set()
     filtered_count = 0
+    total_tokens_checked = 0
     
-    for meta in top_metas[:5]:
+    for meta in sorted_metas[:CONFIG["MAX_CATEGORIES"]]:
         slug = meta["slug"]
         print(f"\n🔎 [DEX] بررسی دسته: {meta['name']} ({slug})")
         
@@ -328,6 +319,7 @@ def get_gainers_from_dex():
         token_count = 0
         
         for pair in pairs:
+            total_tokens_checked += 1
             try:
                 base_token = pair.get("baseToken", {})
                 token_symbol = base_token.get("symbol", "نامشخص")
@@ -370,7 +362,11 @@ def get_gainers_from_dex():
         
         print(f"   📊 [DEX] تعداد توکن‌های باکیفیت در این دسته: {token_count}")
     
+    # مرتب‌سازی بر اساس رشد
+    all_gainers.sort(key=lambda x: float(x.get('change_24h', 0)), reverse=True)
+    
     print(f"\n📈 [DEX] تعداد کل ارزهای باکیفیت پیدا شده: {len(all_gainers)}")
+    print(f"📊 [DEX] تعداد کل توکن‌های بررسی شده: {total_tokens_checked}")
     print(f"⏭️ [DEX] تعداد ارزهای فیلتر شده: {filtered_count}")
     
     return all_gainers
@@ -378,7 +374,6 @@ def get_gainers_from_dex():
 # ==================== توابع پیدا کردن خریداران اولیه ====================
 
 def get_first_buyers_evm(contract_address, chain_name="ethereum"):
-    """پیدا کردن خریداران اولیه با Etherscan API V2"""
     chain_map = {
         "ethereum": 1, "eth": 1, "bsc": 56, "bnb": 56,
         "arbitrum": 42161, "optimism": 10, "polygon": 137,
@@ -429,8 +424,54 @@ def get_first_buyers_evm(contract_address, chain_name="ethereum"):
         print(f"❌ [EVM] خطا در Etherscan: {e}")
         return []
 
+def get_first_buyers_solana(contract_address):
+    """پیدا کردن خریداران اولیه در شبکه سولانا (با استفاده از Solscan API عمومی)"""
+    print(f"🔗 [SOL] در حال بررسی قرارداد سولانا: {contract_address[:10]}...{contract_address[-6:]}")
+    
+    # استفاده از API عمومی Solscan
+    url = f"https://public-api.solscan.io/account/transactions?account={contract_address}&limit=100"
+    
+    try:
+        response = requests.get(url, timeout=15)
+        
+        if response.status_code == 404:
+            print("ℹ️ [SOL] قرارداد در Solscan پیدا نشد.")
+            return []
+        
+        data = response.json()
+        if not data:
+            print("ℹ️ [SOL] اطلاعاتی برای این قرارداد وجود ندارد.")
+            return []
+        
+        # پردازش تراکنش‌ها برای پیدا کردن خریداران اولیه
+        if isinstance(data, list):
+            print(f"📊 [SOL] تعداد تراکنش‌های پیدا شده: {len(data)}")
+            
+            # ساده‌سازی: فقط آدرس‌های منحصربه‌فرد را برمی‌گردانیم
+            buyers = []
+            seen = set()
+            for tx in data:
+                from_addr = tx.get("from", "")
+                if from_addr and from_addr not in seen:
+                    seen.add(from_addr)
+                    buyers.append({
+                        "address": from_addr,
+                        "amount": 0,
+                        "timestamp": tx.get("blockTime", 0)
+                    })
+                    if len(buyers) >= 5:
+                        break
+            
+            print(f"✅ [SOL] تعداد خریداران اولیه پیدا شده: {len(buyers)}")
+            return buyers
+        
+        return []
+        
+    except Exception as e:
+        print(f"❌ [SOL] خطا در Solscan: {e}")
+        return []
+
 def get_first_buyers(contract_address, chain_name):
-    """تشخیص شبکه و دریافت خریداران اولیه"""
     if not contract_address or len(contract_address) < 10:
         print(f"⚠️ آدرس قرارداد نامعتبر")
         return []
@@ -439,19 +480,16 @@ def get_first_buyers(contract_address, chain_name):
     
     if chain in ["ethereum", "eth", "bsc", "bnb", "arbitrum", "optimism", "polygon", "base", "linea", "avalanche", "fantom"]:
         return get_first_buyers_evm(contract_address, chain)
+    elif chain in ["solana", "sol"]:
+        return get_first_buyers_solana(contract_address)
     else:
         print(f"ℹ️ شبکه {chain} پشتیبانی نمی‌شود.")
         return []
 
-# ==================== توابع تشخیص فروش (قسمت جدید) ====================
+# ==================== توابع تشخیص فروش ====================
 
 def check_sell(wallet_address, token, buy_price, buy_date, trade_id):
     """بررسی اینکه آیا کیف پول ارز را فروخته است یا خیر"""
-    # این تابع باید قیمت فعلی را با قیمت خرید مقایسه کند
-    # و در صورت تشخیص فروش، تابع add_sell را صدا بزند
-    # فعلاً یک نمونه ساده
-    
-    # دریافت قیمت فعلی از DexScreener (ساده شده)
     try:
         url = f"https://api.dexscreener.com/latest/dex/search?q={token}"
         response = requests.get(url, timeout=10)
@@ -460,12 +498,9 @@ def check_sell(wallet_address, token, buy_price, buy_date, trade_id):
         if data.get("pairs"):
             current_price = float(data["pairs"][0].get("priceUsd", 0))
             
-            # محاسبه سود
             profit_percent = ((current_price - buy_price) / buy_price) * 100
             
-            # اگر سود به ۲۰٪ رسید، معامله را ببند (نمونه)
             if profit_percent >= 20:
-                # محاسبه مدت زمان نگهداری
                 buy_time = datetime.fromisoformat(buy_date.replace('Z', '+00:00'))
                 now = datetime.utcnow()
                 hold_duration = (now - buy_time).total_seconds() / 3600
@@ -475,7 +510,7 @@ def check_sell(wallet_address, token, buy_price, buy_date, trade_id):
                     wallet_address=wallet_address,
                     token=token,
                     sell_price=current_price,
-                    sell_percent=100,  # فرض می‌کنیم کل ارز را می‌فروشد
+                    sell_percent=100,
                     profit_percent=profit_percent,
                     is_winning=True,
                     hold_duration=hold_duration
@@ -489,14 +524,13 @@ def check_sell(wallet_address, token, buy_price, buy_date, trade_id):
 # ==================== تابع اصلی ====================
 
 def main():
-    """تابع اصلی ربات"""
     print("\n" + "="*60)
     print(f"⏳ شروع اسکن جدید در {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     print("="*60)
     
     start_time = time.time()
     
-    # ۱. اسکن بازار و پیدا کردن ارزهای با رشد بالا
+    # ۱. اسکن بازار با دامنه گسترده
     gainers = get_gainers_from_dex()
     
     if not gainers:
@@ -506,14 +540,15 @@ def main():
     # ۲. مرتب‌سازی بر اساس رشد
     gainers.sort(key=lambda x: float(x.get('change_24h', 0)), reverse=True)
     
-    # ۳. پیدا کردن خریداران اولیه
+    # ۳. پیدا کردن خریداران اولیه (افزایش تعداد ارزهای بررسی‌شده)
     print("\n" + "="*60)
     print("🔍 بررسی خریداران اولیه")
     print("="*60)
     
     valid_tokens = []
+    max_tokens_to_check = min(20, len(gainers))  # افزایش به ۲۰ ارز
     
-    for token in gainers[:10]:  # فقط ۱۰ ارز برتر برای بررسی
+    for token in gainers[:max_tokens_to_check]:
         contract = token.get("contract", "")
         chain = token.get("chain", "")
         
@@ -523,7 +558,6 @@ def main():
             
             if buyers:
                 for buyer in buyers:
-                    # ذخیره معامله
                     trade_id = add_trade(
                         wallet_address=buyer["address"],
                         token_info=token,
@@ -531,7 +565,6 @@ def main():
                         chain=chain
                     )
                     
-                    # بررسی فروش (با قیمت فعلی)
                     check_sell(
                         wallet_address=buyer["address"],
                         token=token.get("symbol", ""),
