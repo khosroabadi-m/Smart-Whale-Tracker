@@ -4,11 +4,13 @@ import csv
 import time
 from datetime import datetime
 import sys
+import json
 
 # ==================== تنظیمات اولیه ====================
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 CHAT_ID = os.getenv("CHAT_ID")
 ETHERSCAN_API_KEY = os.getenv("ETHERSCAN_API_KEY")
+BSCSCAN_API_KEY = os.getenv("BSCSCAN_API_KEY", ETHERSCAN_API_KEY)
 
 if not TELEGRAM_TOKEN or not CHAT_ID or not ETHERSCAN_API_KEY:
     print("❌ خطا: توکن، آیدی کانال یا کلید اتریوم در Secrets تنظیم نشده است.")
@@ -18,20 +20,22 @@ if not TELEGRAM_TOKEN or not CHAT_ID or not ETHERSCAN_API_KEY:
 TRENDING_METAS_URL = "https://api.dexscreener.com/metas/trending/v1"
 META_DETAILS_URL = "https://api.dexscreener.com/metas/meta/v1"
 
-# ==================== تنظیمات فیلترها (گسترش یافته) ====================
+# ==================== تنظیمات فیلترها ====================
 CONFIG = {
-    "MIN_LIQUIDITY_DEX": 30000,
-    "MIN_VOLUME_DEX": 5000,
-    "MIN_CHANGE_24H": 10,          # حداقل رشد توکن
-    "MAX_CHANGE_24H": 500,         # حداکثر رشد معقول
-    "REPORT_COUNT": 5,             # تعداد گزارش‌های ارسال شده
-    "MAX_CATEGORIES": 10,          # ← افزایش از ۵ به ۱۰
-    "INCLUDE_SOLANA": True,        # ← اضافه شدن سولانا
+    "MIN_LIQUIDITY_DEX": 20000,
+    "MIN_VOLUME_DEX": 3000,
+    "MIN_CHANGE_24H": 10,
+    "MAX_CHANGE_24H": 500,
+    "REPORT_COUNT": 5,
+    "MAX_CATEGORIES": 10,
     "SUPPORTED_CHAINS": [
-        "ethereum", "eth", "bsc", "bnb", "arbitrum",
-        "optimism", "polygon", "base", "linea",
-        "avalanche", "fantom",
-        "solana", "sol"            # ← سولانا اضافه شد
+        "ethereum", "eth",
+        "bsc", "bnb",
+        "polygon",
+        "arbitrum",
+        "linea",
+        "celo",
+        "gnosis"
     ]
 }
 
@@ -102,6 +106,8 @@ def get_sells_headers():
 def get_whitelist_headers():
     return ["rank", "wallet_address", "chain", "score",
             "total_trades", "win_rate", "avg_profit", "last_seen"]
+
+# ==================== توابع دیتابیس ====================
 
 def add_trade(wallet_address, token_info, price, chain):
     trade_id = f"trade_{int(time.time())}_{wallet_address[:8]}"
@@ -200,9 +206,65 @@ def add_sell(trade_id, wallet_address, token, sell_price, sell_percent, profit_p
     
     write_csv(TRADES_FILE, get_trades_headers(), trades)
 
-# ==================== توابع ارسال پیام ====================
+def get_whitelist():
+    """دریافت لیست کیف پول‌های سفید"""
+    headers = get_whitelist_headers()
+    data = read_csv(WHITELIST_FILE, headers)
+    return [row.get("wallet_address") for row in data if row]
+
+# ==================== توابع ارسال پیام (گزارش کامل) ====================
+
+def send_telegram_report(token_info, buyers, is_whitelisted=False):
+    """ارسال گزارش کامل و مفهومی به تلگرام"""
+    
+    # ایجاد گزارش
+    report = f"""
+🦄 **سیگنال معاملاتی - ارز با خریدار اولیه**
+
+━━━━━━━━━━━━━━━━━━━━━
+📊 **اطلاعات ارز**
+▫️ نام: {token_info.get('name', 'نامشخص')} (${token_info.get('symbol', 'نامشخص')})
+▫️ شبکه: {token_info.get('chain', 'نامشخص')}
+▫️ دسته‌بندی: {token_info.get('meta_name', 'نامشخص')}
+▫️ صرافی: {token_info.get('dex', 'نامشخص')}
+▫️ قیمت فعلی: ${float(token_info.get('price', 0)):,.6f}
+▫️ رشد ۲۴ ساعته: **{token_info.get('change_24h', 0):.2f}%** ✅
+▫️ حجم معاملات: ${token_info.get('volume', 0):,.0f}
+▫️ نقدینگی: ${token_info.get('liquidity', 0):,.0f}
+▫️ مارکت‌کپ: ${token_info.get('market_cap', 0):,.0f}
+
+━━━━━━━━━━━━━━━━━━━━━
+🐋 **کیف‌پول‌های خریدار اولیه ({len(buyers)} نفر)**
+"""
+    
+    whitelist = get_whitelist()
+    
+    for i, buyer in enumerate(buyers[:5], 1):
+        addr = buyer.get("address", "نامشخص")
+        short_addr = addr[:8] + "..." + addr[-6:] if len(addr) > 14 else addr
+        amount = buyer.get("amount", 0)
+        is_white = "⭐ **WHITELIST**" if addr in whitelist else ""
+        report += f"{i}. `{short_addr}`\n   └─ مقدار: {amount:.0f} توکن {is_white}\n"
+    
+    # اضافه کردن اطلاعات بیشتر
+    report += f"""
+━━━━━━━━━━━━━━━━━━━━━
+📈 **تحلیل سریع**
+▫️ **امتیاز کیف پول:** {"عالی" if len(buyers) >= 5 else "خوب"}
+▫️ **تعداد خریداران اولیه:** {len(buyers)}
+▫️ **کیف پول سفید:** {"✅ بله" if is_whitelisted else "❌ خیر"}
+▫️ **نقدینگی:** {"✅ مناسب" if token_info.get('liquidity', 0) > 50000 else "⚠️ متوسط"}
+
+🔗 [مشاهده در DexScreener]({token_info.get('dex_url', '#')})
+📊 [مشاهده در Etherscan](https://etherscan.io/address/{token_info.get('contract', '')})
+
+⏰ {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
+"""
+    
+    return report
 
 def send_telegram_message(message):
+    """ارسال پیام به کانال تلگرام"""
     print("📤 در حال ارسال پیام به تلگرام...")
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
     payload = {
@@ -219,6 +281,22 @@ def send_telegram_message(message):
     except Exception as e:
         print(f"❌ خطا در ارسال پیام: {e}")
         return False
+
+def send_performance_report(summary):
+    """ارسال گزارش عملکرد روزانه"""
+    message = f"""
+📊 **گزارش عملکرد ربات**
+
+━━━━━━━━━━━━━━━━━━━━━
+📈 **خلاصه اسکن امروز**
+▫️ تعداد کل ارزهای باکیفیت: {summary.get('total_tokens', 0)}
+▫️ تعداد ارزهای با خریدار اولیه: {summary.get('valid_tokens', 0)}
+▫️ تعداد کیف پول‌های جدید: {summary.get('new_wallets', 0)}
+▫️ تعداد کیف پول‌های سفید: {summary.get('whitelist_count', 0)}
+
+⏰ آخرین به‌روزرسانی: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
+"""
+    send_telegram_message(message)
 
 # ==================== توابع دریافت از DexScreener ====================
 
@@ -284,7 +362,7 @@ def get_gainers_from_dex():
         print("❌ [DEX] هیچ دسته‌بندی داغی پیدا نشد.")
         return []
     
-    # ===== تغییر ۱: حذف فیلتر رشد دسته‌بندی =====
+    # همه دسته‌بندی‌ها
     top_metas = []
     for meta in metas:
         top_metas.append({
@@ -299,13 +377,11 @@ def get_gainers_from_dex():
         print("ℹ️ [DEX] هیچ دسته‌بندی یافت نشد.")
         return []
     
-    # نمایش ۱۰ دسته‌بندی برتر (بر اساس رشد)
     print("\n🏆 [DEX] دسته‌بندی‌های برتر:")
     sorted_metas = sorted(top_metas, key=lambda x: x["change_24h"], reverse=True)
     for i, meta in enumerate(sorted_metas[:10], 1):
         print(f"   {i}. {meta['name']} (رشد دسته: {meta['change_24h']:.2f}%)")
     
-    # ===== تغییر ۲: افزایش تعداد دسته‌بندی‌ها از ۵ به ۱۰ =====
     all_gainers = []
     seen_tokens = set()
     filtered_count = 0
@@ -362,7 +438,6 @@ def get_gainers_from_dex():
         
         print(f"   📊 [DEX] تعداد توکن‌های باکیفیت در این دسته: {token_count}")
     
-    # مرتب‌سازی بر اساس رشد
     all_gainers.sort(key=lambda x: float(x.get('change_24h', 0)), reverse=True)
     
     print(f"\n📈 [DEX] تعداد کل ارزهای باکیفیت پیدا شده: {len(all_gainers)}")
@@ -374,25 +449,32 @@ def get_gainers_from_dex():
 # ==================== توابع پیدا کردن خریداران اولیه ====================
 
 def get_first_buyers_evm(contract_address, chain_name="ethereum"):
+    """پیدا کردن خریداران اولیه با Etherscan API V2"""
     chain_map = {
-        "ethereum": 1, "eth": 1, "bsc": 56, "bnb": 56,
-        "arbitrum": 42161, "optimism": 10, "polygon": 137,
-        "base": 8453, "linea": 59144, "avalanche": 43114,
-        "fantom": 250
+        "ethereum": 1, "eth": 1,
+        "bsc": 56, "bnb": 56,
+        "polygon": 137,
+        "arbitrum": 42161,
+        "linea": 59144,
+        "celo": 42220,
+        "gnosis": 100
     }
     
-    chain_id_num = chain_map.get(chain_name.lower(), 1)
+    chain_id = chain_map.get(chain_name.lower(), 1)
     
-    url = f"https://api.etherscan.io/v2/api?chainid={chain_id_num}&module=account&action=tokentx&contractaddress={contract_address}&sort=asc&apikey={ETHERSCAN_API_KEY}"
+    # برای BSC از کلید جداگانه استفاده می‌شود
+    api_key = BSCSCAN_API_KEY if chain_name.lower() in ["bsc", "bnb"] else ETHERSCAN_API_KEY
     
-    print(f"🔗 [EVM] در حال بررسی قرارداد: {contract_address[:10]}...{contract_address[-6:]} در شبکه {chain_name}")
+    url = f"https://api.etherscan.io/v2/api?chainid={chain_id}&module=account&action=tokentx&contractaddress={contract_address}&sort=asc&apikey={api_key}"
+    
+    print(f"🔗 [EVM] در حال بررسی قرارداد: {contract_address[:10]}...{contract_address[-6:]} در شبکه {chain_name} (Chain ID: {chain_id})")
     
     try:
         response = requests.get(url, timeout=15)
         data = response.json()
         
         if data.get("status") != "1":
-            print(f"⚠️ [EVM] خطای Etherscan: {data.get('message', 'خطای ناشناخته')}")
+            print(f"⚠️ [EVM] خطای Etherscan: {data.get('message', data.get('result', 'خطای ناشناخته'))}")
             return []
         
         transactions = data.get("result", [])
@@ -424,53 +506,6 @@ def get_first_buyers_evm(contract_address, chain_name="ethereum"):
         print(f"❌ [EVM] خطا در Etherscan: {e}")
         return []
 
-def get_first_buyers_solana(contract_address):
-    """پیدا کردن خریداران اولیه در شبکه سولانا (با استفاده از Solscan API عمومی)"""
-    print(f"🔗 [SOL] در حال بررسی قرارداد سولانا: {contract_address[:10]}...{contract_address[-6:]}")
-    
-    # استفاده از API عمومی Solscan
-    url = f"https://public-api.solscan.io/account/transactions?account={contract_address}&limit=100"
-    
-    try:
-        response = requests.get(url, timeout=15)
-        
-        if response.status_code == 404:
-            print("ℹ️ [SOL] قرارداد در Solscan پیدا نشد.")
-            return []
-        
-        data = response.json()
-        if not data:
-            print("ℹ️ [SOL] اطلاعاتی برای این قرارداد وجود ندارد.")
-            return []
-        
-        # پردازش تراکنش‌ها برای پیدا کردن خریداران اولیه
-        if isinstance(data, list):
-            print(f"📊 [SOL] تعداد تراکنش‌های پیدا شده: {len(data)}")
-            
-            # ساده‌سازی: فقط آدرس‌های منحصربه‌فرد را برمی‌گردانیم
-            buyers = []
-            seen = set()
-            for tx in data:
-                from_addr = tx.get("from", "")
-                if from_addr and from_addr not in seen:
-                    seen.add(from_addr)
-                    buyers.append({
-                        "address": from_addr,
-                        "amount": 0,
-                        "timestamp": tx.get("blockTime", 0)
-                    })
-                    if len(buyers) >= 5:
-                        break
-            
-            print(f"✅ [SOL] تعداد خریداران اولیه پیدا شده: {len(buyers)}")
-            return buyers
-        
-        return []
-        
-    except Exception as e:
-        print(f"❌ [SOL] خطا در Solscan: {e}")
-        return []
-
 def get_first_buyers(contract_address, chain_name):
     if not contract_address or len(contract_address) < 10:
         print(f"⚠️ آدرس قرارداد نامعتبر")
@@ -478,10 +513,8 @@ def get_first_buyers(contract_address, chain_name):
     
     chain = chain_name.lower()
     
-    if chain in ["ethereum", "eth", "bsc", "bnb", "arbitrum", "optimism", "polygon", "base", "linea", "avalanche", "fantom"]:
+    if chain in CONFIG["SUPPORTED_CHAINS"]:
         return get_first_buyers_evm(contract_address, chain)
-    elif chain in ["solana", "sol"]:
-        return get_first_buyers_solana(contract_address)
     else:
         print(f"ℹ️ شبکه {chain} پشتیبانی نمی‌شود.")
         return []
@@ -530,7 +563,7 @@ def main():
     
     start_time = time.time()
     
-    # ۱. اسکن بازار با دامنه گسترده
+    # ۱. اسکن بازار
     gainers = get_gainers_from_dex()
     
     if not gainers:
@@ -540,13 +573,14 @@ def main():
     # ۲. مرتب‌سازی بر اساس رشد
     gainers.sort(key=lambda x: float(x.get('change_24h', 0)), reverse=True)
     
-    # ۳. پیدا کردن خریداران اولیه (افزایش تعداد ارزهای بررسی‌شده)
+    # ۳. پیدا کردن خریداران اولیه
     print("\n" + "="*60)
     print("🔍 بررسی خریداران اولیه")
     print("="*60)
     
     valid_tokens = []
-    max_tokens_to_check = min(20, len(gainers))  # افزایش به ۲۰ ارز
+    new_wallets_count = 0
+    max_tokens_to_check = min(20, len(gainers))
     
     for token in gainers[:max_tokens_to_check]:
         contract = token.get("contract", "")
@@ -564,6 +598,7 @@ def main():
                         price=float(token.get("price", 0)),
                         chain=chain
                     )
+                    new_wallets_count += 1
                     
                     check_sell(
                         wallet_address=buyer["address"],
@@ -585,26 +620,36 @@ def main():
     print("📊 گزارش نهایی")
     print("="*60)
     
+    whitelist = get_whitelist()
+    
     print(f"📊 تعداد کل ارزهای باکیفیت: {len(gainers)}")
     print(f"✅ تعداد ارزهای با خریدار اولیه: {len(valid_tokens)}")
+    print(f"🆕 کیف پول‌های جدید ذخیره شده: {new_wallets_count}")
+    print(f"⭐ تعداد کیف پول‌های سفید: {len(whitelist)}")
     
-    # ۵. ارسال گزارش به تلگرام
+    # ۵. ارسال گزارش کامل به تلگرام
     report_count = min(5, len(valid_tokens))
     if report_count > 0:
-        print(f"\n📨 در حال ارسال {report_count} گزارش به تلگرام...")
+        print(f"\n📨 در حال ارسال {report_count} گزارش کامل به تلگرام...")
         
         for i, (token, buyers) in enumerate(valid_tokens[:report_count], 1):
-            message = f"""
-🦄 **ارز با خریدار اولیه شناسایی شد!**
-▫️ نام: {token.get('name', 'نامشخص')} (${token.get('symbol', 'نامشخص')})
-▫️ شبکه: {token.get('chain', 'نامشخص')}
-▫️ رشد ۲۴ ساعته: **{token.get('change_24h', 0):.2f}%** ✅
-▫️ تعداد خریداران اولیه: {len(buyers)}
-🔗 [مشاهده در DexScreener]({token.get('dex_url', '#')})
-            """
+            # بررسی اینکه آیا کیف پول سفید در بین خریداران وجود دارد
+            is_whitelisted = any(buyer.get("address") in whitelist for buyer in buyers)
             
-            send_telegram_message(message)
-            time.sleep(2)
+            report = send_telegram_report(token, buyers, is_whitelisted)
+            send_telegram_message(report)
+            time.sleep(3)
+    
+    # ۶. ارسال گزارش عملکرد
+    summary = {
+        'total_tokens': len(gainers),
+        'valid_tokens': len(valid_tokens),
+        'new_wallets': new_wallets_count,
+        'whitelist_count': len(whitelist)
+    }
+    
+    if len(valid_tokens) > 0:
+        send_performance_report(summary)
     
     elapsed_time = time.time() - start_time
     print(f"\n✅ فرآیند در {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} به پایان رسید.")
