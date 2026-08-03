@@ -25,9 +25,9 @@ META_DETAILS_URL = "https://api.dexscreener.com/metas/meta/v1"
 
 # ==================== تنظیمات فیلترها ====================
 CONFIG = {
-    "MIN_LIQUIDITY_DEX": 20000,
-    "MIN_VOLUME_DEX": 3000,
-    "MIN_CHANGE_24H": 10,
+    "MIN_LIQUIDITY_DEX": 10000,    # کاهش از ۲۰,۰۰۰ به ۱۰,۰۰۰ دلار
+    "MIN_VOLUME_DEX": 1500,        # کاهش از ۳,۰۰۰ به ۱,۵۰۰ دلار
+    "MIN_CHANGE_24H": 5,           # کاهش از ۱۰٪ به ۵٪
     "MAX_CHANGE_24H": 500,
     "REPORT_COUNT": 5,
     "MAX_CATEGORIES": 10,
