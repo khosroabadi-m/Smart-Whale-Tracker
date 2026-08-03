@@ -10,11 +10,14 @@ import json
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 CHAT_ID = os.getenv("CHAT_ID")
 ETHERSCAN_API_KEY = os.getenv("ETHERSCAN_API_KEY")
-BSCSCAN_API_KEY = os.getenv("BSCSCAN_API_KEY", ETHERSCAN_API_KEY)
+BSCSCAN_API_KEY = os.getenv("BSCSCAN_API_KEY")  # کلید جدید BSC
 
 if not TELEGRAM_TOKEN or not CHAT_ID or not ETHERSCAN_API_KEY:
     print("❌ خطا: توکن، آیدی کانال یا کلید اتریوم در Secrets تنظیم نشده است.")
     sys.exit(1)
+
+if not BSCSCAN_API_KEY:
+    print("⚠️ هشدار: BSCSCAN_API_KEY تنظیم نشده است. شبکه BSC بررسی نمی‌شود.")
 
 # آدرس‌های API
 TRENDING_METAS_URL = "https://api.dexscreener.com/metas/trending/v1"
@@ -212,12 +215,11 @@ def get_whitelist():
     data = read_csv(WHITELIST_FILE, headers)
     return [row.get("wallet_address") for row in data if row]
 
-# ==================== توابع ارسال پیام (گزارش کامل) ====================
+# ==================== توابع ارسال پیام ====================
 
 def send_telegram_report(token_info, buyers, is_whitelisted=False):
     """ارسال گزارش کامل و مفهومی به تلگرام"""
     
-    # ایجاد گزارش
     report = f"""
 🦄 **سیگنال معاملاتی - ارز با خریدار اولیه**
 
@@ -246,7 +248,6 @@ def send_telegram_report(token_info, buyers, is_whitelisted=False):
         is_white = "⭐ **WHITELIST**" if addr in whitelist else ""
         report += f"{i}. `{short_addr}`\n   └─ مقدار: {amount:.0f} توکن {is_white}\n"
     
-    # اضافه کردن اطلاعات بیشتر
     report += f"""
 ━━━━━━━━━━━━━━━━━━━━━
 📈 **تحلیل سریع**
@@ -362,7 +363,6 @@ def get_gainers_from_dex():
         print("❌ [DEX] هیچ دسته‌بندی داغی پیدا نشد.")
         return []
     
-    # همه دسته‌بندی‌ها
     top_metas = []
     for meta in metas:
         top_metas.append({
@@ -462,8 +462,14 @@ def get_first_buyers_evm(contract_address, chain_name="ethereum"):
     
     chain_id = chain_map.get(chain_name.lower(), 1)
     
-    # برای BSC از کلید جداگانه استفاده می‌شود
-    api_key = BSCSCAN_API_KEY if chain_name.lower() in ["bsc", "bnb"] else ETHERSCAN_API_KEY
+    # انتخاب کلید مناسب بر اساس شبکه
+    if chain_name.lower() in ["bsc", "bnb"]:
+        api_key = BSCSCAN_API_KEY
+        if not api_key:
+            print("⚠️ [BSC] کلید BSCscan تنظیم نشده است.")
+            return []
+    else:
+        api_key = ETHERSCAN_API_KEY
     
     url = f"https://api.etherscan.io/v2/api?chainid={chain_id}&module=account&action=tokentx&contractaddress={contract_address}&sort=asc&apikey={api_key}"
     
@@ -474,7 +480,7 @@ def get_first_buyers_evm(contract_address, chain_name="ethereum"):
         data = response.json()
         
         if data.get("status") != "1":
-            print(f"⚠️ [EVM] خطای Etherscan: {data.get('message', data.get('result', 'خطای ناشناخته'))}")
+            print(f"⚠️ [EVM] خطای API: {data.get('message', data.get('result', 'خطای ناشناخته'))}")
             return []
         
         transactions = data.get("result", [])
@@ -633,7 +639,6 @@ def main():
         print(f"\n📨 در حال ارسال {report_count} گزارش کامل به تلگرام...")
         
         for i, (token, buyers) in enumerate(valid_tokens[:report_count], 1):
-            # بررسی اینکه آیا کیف پول سفید در بین خریداران وجود دارد
             is_whitelisted = any(buyer.get("address") in whitelist for buyer in buyers)
             
             report = send_telegram_report(token, buyers, is_whitelisted)
