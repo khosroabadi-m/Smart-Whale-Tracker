@@ -33,7 +33,6 @@ CONFIG = {
     "MAX_CATEGORIES": 10,
     "SUPPORTED_CHAINS": [
         "ethereum", "eth",
-        "bsc", "bnb",
         "polygon",
         "arbitrum",
         "linea",
