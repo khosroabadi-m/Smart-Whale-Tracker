@@ -61,6 +61,7 @@ def wallet_headers() -> List[str]:
         "address", "chain", "first_seen", "last_seen",
         "total_trades", "total_sells", "winning_sells", "losing_sells",
         "win_rate", "avg_profit", "avg_hold_duration", "score", "in_whitelist",
+        "is_whale",
     ]
 
 
@@ -84,6 +85,21 @@ def whitelist_headers() -> List[str]:
     return [
         "rank", "wallet_address", "chain", "score",
         "total_trades", "win_rate", "avg_profit", "last_seen",
+    ]
+
+
+def whale_headers() -> List[str]:
+    return [
+        "address", "chain", "promoted_at", "last_checked",
+        "score", "win_rate", "winning_sells", "total_trades",
+        "avg_profit", "status",
+    ]
+
+
+def alert_headers() -> List[str]:
+    return [
+        "alert_id", "alert_type", "wallet_address", "token", "contract",
+        "chain", "amount", "price", "tx_hash", "created_at", "notes",
     ]
 
 
@@ -197,6 +213,7 @@ def add_trade(
             "avg_hold_duration": "0",
             "score": "0",
             "in_whitelist": "FALSE",
+            "is_whale": "FALSE",
         })
     return trade_id
 
@@ -292,3 +309,95 @@ def get_whitelist_addresses() -> set:
 
 def now_iso() -> str:
     return datetime.now(timezone.utc).replace(tzinfo=None).isoformat()
+
+
+# ---------- Whale helpers ----------
+
+def get_whales() -> List[Dict]:
+    return read_csv(cfg.WHALES_FILE, whale_headers())
+
+
+def get_whale_addresses() -> set:
+    return {
+        (r.get("address") or "").lower()
+        for r in get_whales()
+        if r.get("address") and (r.get("status") or "active") == "active"
+    }
+
+
+def is_whale(address: str) -> bool:
+    return address.lower() in get_whale_addresses()
+
+
+def upsert_whale(whale: Dict) -> None:
+    headers = whale_headers()
+    data = read_csv(cfg.WHALES_FILE, headers)
+    addr = whale["address"].lower()
+    whale["address"] = addr
+    found = False
+    for i, row in enumerate(data):
+        if (row.get("address") or "").lower() == addr:
+            data[i] = {**row, **whale}
+            found = True
+            break
+    if not found:
+        data.append(whale)
+    write_csv(cfg.WHALES_FILE, headers, data)
+
+
+def update_whale_last_checked(address: str, ts: Optional[str] = None) -> None:
+    ts = ts or now_iso()
+    data = get_whales()
+    for w in data:
+        if (w.get("address") or "").lower() == address.lower():
+            w["last_checked"] = ts
+            break
+    write_csv(cfg.WHALES_FILE, whale_headers(), data)
+
+
+def alert_exists(wallet: str, tx_hash: str) -> bool:
+    if not tx_hash:
+        return False
+    wallet = wallet.lower()
+    for a in read_csv(cfg.ALERTS_FILE, alert_headers()):
+        if (a.get("wallet_address") or "").lower() == wallet and (a.get("tx_hash") or "") == tx_hash:
+            return True
+    return False
+
+
+def add_alert(
+    alert_type: str,
+    wallet_address: str,
+    token: str,
+    contract: str,
+    chain: str,
+    amount: float,
+    price: float,
+    tx_hash: str,
+    notes: str = "",
+) -> Optional[str]:
+    wallet_address = wallet_address.lower()
+    if alert_exists(wallet_address, tx_hash):
+        return None
+    alert_id = f"alert_{int(datetime.now(timezone.utc).replace(tzinfo=None).timestamp())}_{wallet_address[:8]}"
+    row = {
+        "alert_id": alert_id,
+        "alert_type": alert_type,  # buy | sell | promote
+        "wallet_address": wallet_address,
+        "token": (token or "")[:32],
+        "contract": (contract or "").lower(),
+        "chain": (chain or "").lower(),
+        "amount": str(round(amount, 4)) if amount else "0",
+        "price": f"{price:.10f}".rstrip("0").rstrip(".") if price else "0",
+        "tx_hash": tx_hash or "",
+        "created_at": now_iso(),
+        "notes": (notes or "")[:200],
+    }
+    data = read_csv(cfg.ALERTS_FILE, alert_headers())
+    data.append(row)
+    # keep last 2000 alerts only
+    if len(data) > 2000:
+        data = data[-2000:]
+    write_csv(cfg.ALERTS_FILE, alert_headers(), data)
+    return alert_id
+
