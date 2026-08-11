@@ -31,7 +31,8 @@ CONFIG = {
     "MAX_CHANGE_24H": 500,
     "REPORT_COUNT": 5,
     "MAX_CATEGORIES": 10,
-    "MAX_PROFIT_PERCENT": 200,  # ✅ جدید: محدودیت سود غیرطبیعی
+    "MAX_PROFIT_PERCENT": 200,  # حداکثر سود قابل قبول (برای جلوگیری از خطا)
+    "MIN_HOLD_HOURS": 1,        # ✅ جدید: حداقل زمان نگهداری (ساعت)
     "SUPPORTED_CHAINS": [
         "ethereum", "eth",
         "polygon",
@@ -178,7 +179,6 @@ def add_sell(trade_id, wallet_address, token, sell_price, sell_percent, profit_p
     data.append(sell_data)
     write_csv(SELLS_FILE, headers, data)
     
-    # ✅ به‌روزرسانی کیف پول
     wallet = get_wallet(wallet_address)
     if wallet:
         wallet["total_sells"] = str(int(wallet.get("total_sells", 0)) + 1)
@@ -189,7 +189,6 @@ def add_sell(trade_id, wallet_address, token, sell_price, sell_percent, profit_p
         wallet["last_seen"] = datetime.utcnow().isoformat()
         update_wallet(wallet)
     
-    # به‌روزرسانی trade
     trades = read_csv(TRADES_FILE, get_trades_headers())
     for trade in trades:
         if trade.get("trade_id") == trade_id:
@@ -523,10 +522,12 @@ def get_first_buyers(contract_address, chain_name):
 
 def check_sell(wallet_address, token, buy_price, buy_date, trade_id):
     """
-    بررسی اینکه آیا کیف پول ارز را فروخته است یا خیر
-    ✅ اصلاح: محدود کردن سود غیرطبیعی
+    بررسی فروش با دو شرط جدید:
+    ۱. حداقل زمان نگهداری (۱ ساعت)
+    ۲. تشخیص فروش ضررده
     """
     try:
+        # دریافت قیمت فعلی
         url = f"https://api.dexscreener.com/latest/dex/search?q={token}"
         response = requests.get(url, timeout=10)
         data = response.json()
@@ -535,16 +536,18 @@ def check_sell(wallet_address, token, buy_price, buy_date, trade_id):
             current_price = float(data["pairs"][0].get("priceUsd", 0))
             profit_percent = ((current_price - buy_price) / buy_price) * 100
             
-            # ✅ محدود کردن سود غیرطبیعی (حداکثر ۲۰۰٪)
+            # محاسبه مدت زمان نگهداری
+            buy_time = datetime.fromisoformat(buy_date.replace('Z', '+00:00'))
+            now = datetime.utcnow()
+            hold_duration = (now - buy_time).total_seconds() / 3600
+            
+            # ✅ شرط جدید: محدود کردن سود غیرطبیعی
             if profit_percent > CONFIG["MAX_PROFIT_PERCENT"]:
                 print(f"⚠️ سود غیرطبیعی {profit_percent:.2f}% برای {token} - نادیده گرفته شد.")
                 return False
             
-            if profit_percent >= 20:
-                buy_time = datetime.fromisoformat(buy_date.replace('Z', '+00:00'))
-                now = datetime.utcnow()
-                hold_duration = (now - buy_time).total_seconds() / 3600
-                
+            # ✅ شرط جدید: فروش با سود مثبت (حداقل ۲۰٪ و حداقل ۱ ساعت)
+            if profit_percent >= 20 and hold_duration >= CONFIG["MIN_HOLD_HOURS"]:
                 add_sell(
                     trade_id=trade_id,
                     wallet_address=wallet_address,
@@ -555,7 +558,29 @@ def check_sell(wallet_address, token, buy_price, buy_date, trade_id):
                     is_winning=True,
                     hold_duration=hold_duration
                 )
+                print(f"✅ فروش سودده ثبت شد: {token} - سود: {profit_percent:.2f}% - زمان: {hold_duration:.2f} ساعت")
                 return True
+            
+            # ✅ شرط جدید: فروش با ضرر (حداقل ۵-٪)
+            elif profit_percent <= -5:
+                add_sell(
+                    trade_id=trade_id,
+                    wallet_address=wallet_address,
+                    token=token,
+                    sell_price=current_price,
+                    sell_percent=100,
+                    profit_percent=profit_percent,
+                    is_winning=False,
+                    hold_duration=hold_duration
+                )
+                print(f"⚠️ فروش ضررده ثبت شد: {token} - ضرر: {profit_percent:.2f}% - زمان: {hold_duration:.2f} ساعت")
+                return True
+            
+            # اگر شرایط فروش برقرار نیست
+            else:
+                print(f"ℹ️ {token}: سود {profit_percent:.2f}% (نیاز به {CONFIG['MIN_HOLD_HOURS']} ساعت و سود ≥ ۲۰٪ یا ضرر ≥ ۵٪)")
+                return False
+                
     except Exception as e:
         print(f"⚠️ خطا در بررسی فروش برای {token}: {e}")
     
