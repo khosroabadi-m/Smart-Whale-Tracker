@@ -10,7 +10,7 @@ import json
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 CHAT_ID = os.getenv("CHAT_ID")
 ETHERSCAN_API_KEY = os.getenv("ETHERSCAN_API_KEY")
-BSCSCAN_API_KEY = os.getenv("BSCSCAN_API_KEY")  # کلید جدید BSC
+BSCSCAN_API_KEY = os.getenv("BSCSCAN_API_KEY")
 
 if not TELEGRAM_TOKEN or not CHAT_ID or not ETHERSCAN_API_KEY:
     print("❌ خطا: توکن، آیدی کانال یا کلید اتریوم در Secrets تنظیم نشده است.")
@@ -25,12 +25,13 @@ META_DETAILS_URL = "https://api.dexscreener.com/metas/meta/v1"
 
 # ==================== تنظیمات فیلترها ====================
 CONFIG = {
-    "MIN_LIQUIDITY_DEX": 10000,    # کاهش از ۲۰,۰۰۰ به ۱۰,۰۰۰ دلار
-    "MIN_VOLUME_DEX": 1500,        # کاهش از ۳,۰۰۰ به ۱,۵۰۰ دلار
-    "MIN_CHANGE_24H": 5,           # کاهش از ۱۰٪ به ۵٪
+    "MIN_LIQUIDITY_DEX": 10000,
+    "MIN_VOLUME_DEX": 1500,
+    "MIN_CHANGE_24H": 5,
     "MAX_CHANGE_24H": 500,
     "REPORT_COUNT": 5,
     "MAX_CATEGORIES": 10,
+    "MAX_PROFIT_PERCENT": 200,  # ✅ جدید: محدودیت سود غیرطبیعی
     "SUPPORTED_CHAINS": [
         "ethereum", "eth",
         "polygon",
@@ -177,6 +178,7 @@ def add_sell(trade_id, wallet_address, token, sell_price, sell_percent, profit_p
     data.append(sell_data)
     write_csv(SELLS_FILE, headers, data)
     
+    # ✅ به‌روزرسانی کیف پول
     wallet = get_wallet(wallet_address)
     if wallet:
         wallet["total_sells"] = str(int(wallet.get("total_sells", 0)) + 1)
@@ -187,6 +189,7 @@ def add_sell(trade_id, wallet_address, token, sell_price, sell_percent, profit_p
         wallet["last_seen"] = datetime.utcnow().isoformat()
         update_wallet(wallet)
     
+    # به‌روزرسانی trade
     trades = read_csv(TRADES_FILE, get_trades_headers())
     for trade in trades:
         if trade.get("trade_id") == trade_id:
@@ -209,7 +212,6 @@ def add_sell(trade_id, wallet_address, token, sell_price, sell_percent, profit_p
     write_csv(TRADES_FILE, get_trades_headers(), trades)
 
 def get_whitelist():
-    """دریافت لیست کیف پول‌های سفید"""
     headers = get_whitelist_headers()
     data = read_csv(WHITELIST_FILE, headers)
     return [row.get("wallet_address") for row in data if row]
@@ -217,8 +219,6 @@ def get_whitelist():
 # ==================== توابع ارسال پیام ====================
 
 def send_telegram_report(token_info, buyers, is_whitelisted=False):
-    """ارسال گزارش کامل و مفهومی به تلگرام"""
-    
     report = f"""
 🦄 **سیگنال معاملاتی - ارز با خریدار اولیه**
 
@@ -260,11 +260,9 @@ def send_telegram_report(token_info, buyers, is_whitelisted=False):
 
 ⏰ {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
 """
-    
     return report
 
 def send_telegram_message(message):
-    """ارسال پیام به کانال تلگرام"""
     print("📤 در حال ارسال پیام به تلگرام...")
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
     payload = {
@@ -283,7 +281,6 @@ def send_telegram_message(message):
         return False
 
 def send_performance_report(summary):
-    """ارسال گزارش عملکرد روزانه"""
     message = f"""
 📊 **گزارش عملکرد ربات**
 
@@ -448,7 +445,6 @@ def get_gainers_from_dex():
 # ==================== توابع پیدا کردن خریداران اولیه ====================
 
 def get_first_buyers_evm(contract_address, chain_name="ethereum"):
-    """پیدا کردن خریداران اولیه با Etherscan API V2"""
     chain_map = {
         "ethereum": 1, "eth": 1,
         "bsc": 56, "bnb": 56,
@@ -461,7 +457,6 @@ def get_first_buyers_evm(contract_address, chain_name="ethereum"):
     
     chain_id = chain_map.get(chain_name.lower(), 1)
     
-    # انتخاب کلید مناسب بر اساس شبکه
     if chain_name.lower() in ["bsc", "bnb"]:
         api_key = BSCSCAN_API_KEY
         if not api_key:
@@ -524,10 +519,13 @@ def get_first_buyers(contract_address, chain_name):
         print(f"ℹ️ شبکه {chain} پشتیبانی نمی‌شود.")
         return []
 
-# ==================== توابع تشخیص فروش ====================
+# ==================== توابع تشخیص فروش (اصلاح‌شده) ====================
 
 def check_sell(wallet_address, token, buy_price, buy_date, trade_id):
-    """بررسی اینکه آیا کیف پول ارز را فروخته است یا خیر"""
+    """
+    بررسی اینکه آیا کیف پول ارز را فروخته است یا خیر
+    ✅ اصلاح: محدود کردن سود غیرطبیعی
+    """
     try:
         url = f"https://api.dexscreener.com/latest/dex/search?q={token}"
         response = requests.get(url, timeout=10)
@@ -535,8 +533,12 @@ def check_sell(wallet_address, token, buy_price, buy_date, trade_id):
         
         if data.get("pairs"):
             current_price = float(data["pairs"][0].get("priceUsd", 0))
-            
             profit_percent = ((current_price - buy_price) / buy_price) * 100
+            
+            # ✅ محدود کردن سود غیرطبیعی (حداکثر ۲۰۰٪)
+            if profit_percent > CONFIG["MAX_PROFIT_PERCENT"]:
+                print(f"⚠️ سود غیرطبیعی {profit_percent:.2f}% برای {token} - نادیده گرفته شد.")
+                return False
             
             if profit_percent >= 20:
                 buy_time = datetime.fromisoformat(buy_date.replace('Z', '+00:00'))
@@ -568,17 +570,14 @@ def main():
     
     start_time = time.time()
     
-    # ۱. اسکن بازار
     gainers = get_gainers_from_dex()
     
     if not gainers:
         print("ℹ️ هیچ ارز با رشد بالا پیدا نشد.")
         return
     
-    # ۲. مرتب‌سازی بر اساس رشد
     gainers.sort(key=lambda x: float(x.get('change_24h', 0)), reverse=True)
     
-    # ۳. پیدا کردن خریداران اولیه
     print("\n" + "="*60)
     print("🔍 بررسی خریداران اولیه")
     print("="*60)
@@ -620,7 +619,6 @@ def main():
         else:
             print(f"⏭️ {token['symbol']} بدون قرارداد معتبر - حذف شد.")
     
-    # ۴. گزارش نهایی
     print("\n" + "="*60)
     print("📊 گزارش نهایی")
     print("="*60)
@@ -632,19 +630,16 @@ def main():
     print(f"🆕 کیف پول‌های جدید ذخیره شده: {new_wallets_count}")
     print(f"⭐ تعداد کیف پول‌های سفید: {len(whitelist)}")
     
-    # ۵. ارسال گزارش کامل به تلگرام
     report_count = min(5, len(valid_tokens))
     if report_count > 0:
         print(f"\n📨 در حال ارسال {report_count} گزارش کامل به تلگرام...")
         
         for i, (token, buyers) in enumerate(valid_tokens[:report_count], 1):
             is_whitelisted = any(buyer.get("address") in whitelist for buyer in buyers)
-            
             report = send_telegram_report(token, buyers, is_whitelisted)
             send_telegram_message(report)
             time.sleep(3)
     
-    # ۶. ارسال گزارش عملکرد
     summary = {
         'total_tokens': len(gainers),
         'valid_tokens': len(valid_tokens),
