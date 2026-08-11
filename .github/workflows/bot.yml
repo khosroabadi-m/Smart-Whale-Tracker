@@ -2,7 +2,8 @@ name: Crypto Wallet Bot
 
 on:
   schedule:
-    - cron: "*/30 2-20 * * *" 
+    # Every 45 minutes between 02:00–20:00 UTC (roughly active market hours)
+    - cron: "0,45 2-20 * * *"
   workflow_dispatch:
 
 jobs:
@@ -12,7 +13,7 @@ jobs:
       contents: write
 
     steps:
-      - name: Checkout repo
+      - name: Checkout
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
@@ -20,7 +21,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.11'
+          python-version: "3.11"
 
       - name: Install dependencies
         run: |
@@ -32,14 +33,12 @@ jobs:
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
           CHAT_ID: ${{ secrets.CHAT_ID }}
           ETHERSCAN_API_KEY: ${{ secrets.ETHERSCAN_API_KEY }}
-          BSCSCAN_API_KEY: ${{ secrets.BSCSCAN_API_KEY }}   # ← این خط باید حتماً اضافه شود
+          BSCSCAN_API_KEY: ${{ secrets.BSCSCAN_API_KEY }}
         run: python bot.py
 
-      - name: Commit changes
+      - name: Commit data changes
         uses: stefanzweifel/git-auto-commit-action@v5
         with:
-          commit_message: "Auto-update: CSV database"
+          commit_message: "chore: update wallet/trade CSV data"
           file_pattern: data/*.csv
           skip_dirty_check: false
-          skip_fetch: false
-          push_options: '--force-with-lease'
