@@ -1,0 +1,38 @@
+name: Fix Historical Data
+
+on:
+  workflow_dispatch:  # فقط با اجرای دستی
+
+jobs:
+  fix-data:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies (if any)
+        run: |
+          python -m pip install --upgrade pip
+          # اگر نیاز به کتابخانه خاصی نیست، این مرحله خالی است
+
+      - name: Run fix_data.py
+        run: python fix_data.py
+
+      - name: Commit changes
+        uses: stefanzweifel/git-auto-commit-action@v5
+        with:
+          commit_message: "fix: اصلاح داده‌های تاریخی (محدودیت سود ۲۰۰٪)"
+          file_pattern: data/*.csv
+          skip_dirty_check: false
+          skip_fetch: false
+          push_options: '--force-with-lease'
