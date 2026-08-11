@@ -1,8 +1,9 @@
-name: Nightly Signal Monitor & Cleanup
+name: Nightly Monitor & Cleanup
 
 on:
   schedule:
-    - cron: "30 22 * * *"  # ۲:۳۰ بامداد تهران
+    # 22:30 UTC ≈ 02:00 Tehran
+    - cron: "30 22 * * *"
   workflow_dispatch:
 
 jobs:
@@ -12,7 +13,7 @@ jobs:
       contents: write
 
     steps:
-      - name: Checkout repo
+      - name: Checkout
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
@@ -20,7 +21,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.11'
+          python-version: "3.11"
 
       - name: Install dependencies
         run: |
@@ -32,13 +33,12 @@ jobs:
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
           CHAT_ID: ${{ secrets.CHAT_ID }}
           ETHERSCAN_API_KEY: ${{ secrets.ETHERSCAN_API_KEY }}
+          BSCSCAN_API_KEY: ${{ secrets.BSCSCAN_API_KEY }}
         run: python monitor_nightly.py
 
-      - name: Commit changes
+      - name: Commit data changes
         uses: stefanzweifel/git-auto-commit-action@v5
         with:
-          commit_message: "Nightly update: scores and cleanup"
+          commit_message: "chore: nightly scores, sells & cleanup"
           file_pattern: data/*.csv
           skip_dirty_check: false
-          skip_fetch: false
-          push_options: '--force-with-lease'
