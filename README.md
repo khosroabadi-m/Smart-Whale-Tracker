@@ -1,91 +1,53 @@
-# Crypto Wallet Bot
+# Crypto Wallet Bot + Whale Tracker
 
-ربات تلگرامی برای پیدا کردن توکن‌های داغ از DexScreener، شناسایی **خریداران اولیه** از روی زنجیره (Etherscan V2)، ثبت معاملات، تشخیص فروش واقعی on-chain، امتیازدهی کیف‌پول‌ها و ساخت **Whitelist**.
+ربات کشف توکن داغ + شناسایی نهنگ از روی عملکرد واقعی + آلارم خرید/فروش نهنگ.
 
-## قابلیت‌ها (نسخه بهبودیافته)
+## جریان
 
-- اسکن trending metas در DexScreener با فیلتر نقدینگی / حجم / رشد منطقی
-- پیدا کردن خریداران اولیه واقعی (`to` در tokentx، بدون آدرس صفر و روترها)
-- جلوگیری از ثبت تکراری trade برای یک کیف‌پول+توکن
-- تشخیص فروش **on-chain** در جاب شبانه (نه فرض قیمت)
-- امتیازدهی واقع‌گرایانه + whitelist با حداقل تعداد معامله
-- پاکسازی کیف‌پول‌های قدیمی و دادهٔ خراب
-- پشتیبانی چندزنجیره‌ای از طریق Etherscan API V2 (Ethereum, BSC, Base, Arbitrum, Polygon, …)
-- نوشتن CSV اتمیک (بدون فایل نصفه)
-- GitHub Actions زمان‌بندی‌شده
+1. **bot.py** — توکن داغ از DexScreener → خریداران اولیه → سیگنال «کشف»
+2. **monitor_nightly.py**
+   - فروش on-chain روی tradeهای باز
+   - امتیازدهی
+   - اگر چند فروش سودده داشت → **ارتقا به نهنگ**
+   - مانیتور نهنگ‌ها: هر خرید/فروش جدید → آلارم تلگرام
 
-## ساختار
+## قوانین نهنگ (config.py)
 
-```
-bot.py                 # اسکن اصلی + سیگنال
-monitor_nightly.py     # فروش on-chain + امتیاز + گزارش شبانه
-fix_data.py            # پاکسازی یک‌باره دادهٔ تاریخی
-config.py              # تمام تنظیمات
-db.py                  # لایه CSV
-apis.py                # DexScreener + Etherscan
-scoring.py             # امتیاز و whitelist
-telegram_utils.py      # پیام‌ها
-data/                  # wallets, trades, sells, whitelist
-tests/                 # تست واحد
-.github/workflows/     # bot / nightly / fix_data
-```
+- حداقل ۲ فروش سودده تأییدشده
+- WinRate ≥ ۶۰٪
+- Score ≥ ۵۵
+- حداقل ۳ معامله
+- فعال در ۳۰ روز اخیر
 
-## Secrets مورد نیاز (GitHub)
+## Secrets
 
-| Secret | توضیح |
-|--------|--------|
-| `TELEGRAM_TOKEN` | توکن ربات تلگرام |
-| `CHAT_ID` | آیدی کانال/چت |
-| `ETHERSCAN_API_KEY` | کلید Etherscan (برای اکثر زنجیره‌ها در V2) |
-| `BSCSCAN_API_KEY` | اختیاری – برای BSC |
+- `TELEGRAM_TOKEN`
+- `CHAT_ID`
+- `ETHERSCAN_API_KEY`
+- `BSCSCAN_API_KEY` (اختیاری)
 
-## اجرای محلی
+## فایل‌های data
 
-```bash
-pip install -r requirements.txt
-export TELEGRAM_TOKEN=...
-export CHAT_ID=...
-export ETHERSCAN_API_KEY=...
-export BSCSCAN_API_KEY=...   # optional
+| فایل | نقش |
+|------|-----|
+| wallets.csv | همه کیف‌پول‌ها + امتیاز |
+| trades.csv | خریدهای ثبت‌شده |
+| sells.csv | فروش‌های on-chain |
+| whitelist.csv | امتیاز بالا |
+| whales.csv | **نهنگ‌های فعال** |
+| whale_alerts.csv | تاریخچه آلارم‌ها |
 
-python bot.py
-python monitor_nightly.py
-python fix_data.py
-```
+## Actions
+
+- `Crypto Wallet Bot` — هر ۴۵ دقیقه (کشف)
+- `Nightly Monitor & Cleanup` — روزانه (فروش + نهنگ + آلارم)
+- `Fix Historical Data` — دستی
 
 ## تست
 
 ```bash
 python tests/test_logic.py
+python fix_data.py
+python bot.py
+python monitor_nightly.py
 ```
-
-تست‌ها بدون نیاز به API key واقعی اجرا می‌شوند (mock).
-
-## منطق مهم
-
-### خریدار اولیه
-- تراکنش‌های توکن از قدیمی به جدید
-- آدرس `to` با مقدار معنادار
-- حذف zero / dead / روترهای شناخته‌شده
-
-### فروش
-- فقط وقتی انتقال خروجی on-chain بعد از زمان خرید دیده شود
-- سود/ضرر از قیمت فعلی DexScreener محاسبه و سقف‌گذاری می‌شود
-
-### امتیاز
-```
-score = win_rate×0.45 + avg_profit×0.25 + timing×0.15 + activity×0.15
-```
-ورود به whitelist: `score ≥ 55` و حداقل ۳ معامله.
-
-## زمان‌بندی Actions
-
-- **bot**: هر ۴۵ دقیقه بین 02–20 UTC
-- **nightly**: 22:30 UTC
-- **fix_data**: فقط دستی
-
-## نکات
-
-- بدون `ETHERSCAN_API_KEY` ربات کار نمی‌کند.
-- Rate-limit اتریوم‌اسکن را رعایت کنید (sleep داخلی وجود دارد).
-- دادهٔ قدیمی پروژه قبلی ممکن است خراب باشد؛ یک‌بار `fix_data.py` را اجرا کنید.
