@@ -16,7 +16,7 @@ WHITELIST_FILE = os.path.join(DATA_DIR, "whitelist.csv")
 
 MAX_AGE_DAYS = 30
 MIN_SCORE_FOR_WHITELIST = 70
-MAX_REASONABLE_PROFIT = 200  # ✅ محدودیت سود منطقی برای امتیازدهی
+MAX_REASONABLE_PROFIT = 50  # ✅ کاهش یافته از ۲۰۰ به ۵۰
 
 # ==================== توابع CSV ====================
 
@@ -46,21 +46,23 @@ def get_whitelist_headers():
 
 def calculate_score(wallet):
     """
-    محاسبه امتیاز کیف پول بر اساس فروش‌های انجام شده
-    ✅ اصلاح: محدود کردن avg_profit به بازه منطقی
+    محاسبه امتیاز کیف پول با وزن‌های جدید:
+    - نرخ برد: ۵۵٪ (افزایش یافته)
+    - میانگین سود: ۲۰٪ (کاهش یافته)
     """
     total_trades = int(wallet.get("total_trades", 0))
     total_sells = int(wallet.get("total_sells", 0))
     winning_sells = int(wallet.get("winning_sells", 0))
+    losing_sells = int(wallet.get("losing_sells", 0))
     
     # اگر فروشی انجام نشده، امتیاز صفر است
     if total_sells == 0:
         return 0.0
     
-    # ۱. نرخ برد
+    # ۱. نرخ برد (وزن ۵۵٪)
     win_rate = (winning_sells / total_sells) * 100
     
-    # ۲. میانگین سود (از sells.csv)
+    # ۲. میانگین سود (وزن ۲۰٪)
     sells = read_csv(SELLS_FILE, ["sell_id", "trade_id", "wallet_address", "token",
                                    "sell_price", "sell_date", "sell_percent",
                                    "profit_percent", "is_winning", "hold_duration_hours"])
@@ -69,24 +71,22 @@ def calculate_score(wallet):
     total_profit = sum(float(s.get("profit_percent", 0)) for s in wallet_sells)
     avg_profit = total_profit / total_sells if total_sells > 0 else 0
     
-    # ✅ محدود کردن avg_profit به بازه منطقی (۰ تا ۲۰۰)
+    # ✅ محدود کردن avg_profit به بازه منطقی (۰ تا ۵۰)
     if avg_profit > MAX_REASONABLE_PROFIT:
         print(f"⚠️ avg_profit غیرطبیعی ({avg_profit:.2f}) برای {wallet.get('address', '')[:10]}... محدود به {MAX_REASONABLE_PROFIT} شد.")
         avg_profit = MAX_REASONABLE_PROFIT
     
-    # ۳. مدت زمان نگهداری
+    # ۳. مدت زمان نگهداری (وزن ۱۵٪)
     total_duration = sum(float(s.get("hold_duration_hours", 0)) for s in wallet_sells)
     avg_duration = total_duration / total_sells if total_sells > 0 else 0
+    timing_score = (avg_profit / (avg_duration + 1)) * 10 if avg_duration >= 0 else 0
     
-    # ۴. مدیریت سرمایه (تعداد فروش‌های جزئی)
+    # ۴. مدیریت سرمایه (وزن ۱۰٪)
     partial_sells = sum(1 for s in wallet_sells if float(s.get("sell_percent", 0)) < 100)
     capital_management_score = (partial_sells / total_trades) * 10 if total_trades > 0 else 0
     
-    # ۵. امتیاز زمان‌بندی (اگر avg_duration صفر باشد، از مقدار ۱ استفاده می‌شود)
-    timing_score = (avg_profit / (avg_duration + 1)) * 10 if avg_duration >= 0 else 0
-    
-    # ۶. امتیاز نهایی
-    score = (win_rate * 0.45) + (avg_profit * 0.30) + (timing_score * 0.15) + (capital_management_score * 0.10)
+    # ✅ امتیاز نهایی با وزن‌های جدید
+    score = (win_rate * 0.55) + (avg_profit * 0.20) + (timing_score * 0.15) + (capital_management_score * 0.10)
     
     return round(score, 2)
 
