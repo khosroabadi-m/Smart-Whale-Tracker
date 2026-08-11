@@ -1,53 +1,66 @@
-# Crypto Wallet Bot + Whale Tracker
+# Smart Whale Tracker
 
-ربات کشف توکن داغ + شناسایی نهنگ از روی عملکرد واقعی + آلارم خرید/فروش نهنگ.
+ربات کشف توکن داغ + شناسایی نهنگ از روی عملکرد واقعی on-chain + آلارم خرید/فروش نهنگ.
 
-## جریان
+**ریپو:** [Smart-Whale-Tracker](https://github.com) · **کانال:** Smart Whale Tracker
 
-1. **bot.py** — توکن داغ از DexScreener → خریداران اولیه → سیگنال «کشف»
-2. **monitor_nightly.py**
-   - فروش on-chain روی tradeهای باز
-   - امتیازدهی
-   - اگر چند فروش سودده داشت → **ارتقا به نهنگ**
-   - مانیتور نهنگ‌ها: هر خرید/فروش جدید → آلارم تلگرام
+## جریان کار
 
-## قوانین نهنگ (config.py)
+```
+توکن داغ (bot)
+    → خریداران اولیه + سیگنال «کشف اولیه»
+         ↓
+فروش on-chain با سود (nightly)
+         ↓
+شرایط نهنگ برقرار شد → پیام «ارتقا به لیست نهنگ»
+         ↓
+مانیتور همان آدرس → آلارم «نهنگ خرید / نهنگ فروخت»
+```
 
-- حداقل ۲ فروش سودده تأییدشده
-- WinRate ≥ ۶۰٪
-- Score ≥ ۵۵
-- حداقل ۳ معامله
-- فعال در ۳۰ روز اخیر
+## قوانین نهنگ (`config.py`)
 
-## Secrets
+| شرط | مقدار پیش‌فرض |
+|-----|----------------|
+| فروش سودده تأییدشده | ≥ ۲ |
+| WinRate | ≥ ۶۰٪ |
+| Score | ≥ ۵۵ |
+| تعداد معامله | ≥ ۳ |
+| آخرین فعالیت | ≤ ۳۰ روز |
+
+## Secrets (GitHub Actions)
 
 - `TELEGRAM_TOKEN`
 - `CHAT_ID`
 - `ETHERSCAN_API_KEY`
 - `BSCSCAN_API_KEY` (اختیاری)
 
-## فایل‌های data
+## ساختار
 
-| فایل | نقش |
-|------|-----|
-| wallets.csv | همه کیف‌پول‌ها + امتیاز |
-| trades.csv | خریدهای ثبت‌شده |
-| sells.csv | فروش‌های on-chain |
-| whitelist.csv | امتیاز بالا |
-| whales.csv | **نهنگ‌های فعال** |
-| whale_alerts.csv | تاریخچه آلارم‌ها |
+```
+bot.py                 # کشف توکن + سیگنال اولیه
+monitor_nightly.py     # فروش + امتیاز + نهنگ + آلارم
+fix_data.py            # پاکسازی داده
+config.py / db.py / apis.py / scoring.py / telegram_utils.py
+data/                  # wallets, trades, sells, whitelist, whales, whale_alerts
+.github/workflows/     # bot | nightly | fix_data
+tests/
+```
 
 ## Actions
 
-- `Crypto Wallet Bot` — هر ۴۵ دقیقه (کشف)
-- `Nightly Monitor & Cleanup` — روزانه (فروش + نهنگ + آلارم)
-- `Fix Historical Data` — دستی
+| Workflow | زمان | کار |
+|----------|------|-----|
+| Smart Whale – Discovery | هر ۴۵ دقیقه | کشف + سیگنال |
+| Smart Whale – Nightly | روزانه | فروش، نهنگ، آلارم |
+| Smart Whale – Fix Data | دستی | پاکسازی |
 
-## تست
+## اجرای محلی
 
 ```bash
-python tests/test_logic.py
+pip install -r requirements.txt
+export TELEGRAM_TOKEN=... CHAT_ID=... ETHERSCAN_API_KEY=...
 python fix_data.py
 python bot.py
 python monitor_nightly.py
+python tests/test_logic.py
 ```
