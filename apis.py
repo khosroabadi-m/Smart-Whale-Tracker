@@ -336,3 +336,87 @@ def detect_onchain_sell(
         "hash": last_out_hash,
         "total_out": total_out,
     }
+
+
+def get_wallet_all_token_transfers(
+    wallet: str,
+    chain: str = "ethereum",
+    sort: str = "desc",
+    offset: int = 100,
+) -> List[Dict]:
+    """Recent token transfers for a wallet (all contracts). Whale monitoring."""
+    cid = _chain_id(chain)
+    key = _api_key_for_chain(chain)
+    if not cid or not key:
+        return []
+
+    params = {
+        "chainid": cid,
+        "module": "account",
+        "action": "tokentx",
+        "address": wallet,
+        "page": 1,
+        "offset": offset,
+        "sort": sort,
+        "apikey": key,
+    }
+    data = _get(cfg.ETHERSCAN_V2, params=params)
+    time.sleep(cfg.API_SLEEP)
+    if not data or data.get("status") != "1":
+        return []
+    result = data.get("result")
+    return result if isinstance(result, list) else []
+
+
+def parse_whale_activity(
+    wallet: str,
+    chain: str,
+    since_ts: int,
+) -> List[Dict]:
+    """
+    Buy/sell events for a whale after since_ts.
+    {type, token_symbol, token_name, contract, amount, timestamp, hash, chain}
+    """
+    txs = get_wallet_all_token_transfers(wallet, chain, sort="desc", offset=80)
+    if not txs:
+        return []
+
+    events = []
+    w = wallet.lower()
+    for tx in txs:
+        try:
+            ts = int(tx.get("timeStamp") or 0)
+            if ts < since_ts:
+                continue
+            decimals = int(tx.get("tokenDecimal") or 18)
+            amount = float(tx.get("value") or 0) / (10 ** decimals)
+            if amount <= 0:
+                continue
+            from_a = (tx.get("from") or "").lower()
+            to_a = (tx.get("to") or "").lower()
+            contract = (tx.get("contractAddress") or "").lower()
+            symbol = tx.get("tokenSymbol") or "???"
+            name = tx.get("tokenName") or symbol
+
+            if to_a == w and from_a != w:
+                etype = "buy"
+            elif from_a == w and to_a != w:
+                etype = "sell"
+            else:
+                continue
+
+            events.append({
+                "type": etype,
+                "token_symbol": symbol,
+                "token_name": name,
+                "contract": contract,
+                "amount": amount,
+                "timestamp": ts,
+                "hash": tx.get("hash") or "",
+                "chain": chain,
+            })
+        except (ValueError, TypeError):
+            continue
+
+    events.sort(key=lambda x: x["timestamp"])
+    return events
