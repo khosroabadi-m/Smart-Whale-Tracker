@@ -108,6 +108,7 @@ def update_all_scores() -> int:
             w["in_whitelist"] = "TRUE"
         else:
             w["in_whitelist"] = "FALSE"
+        w.setdefault("is_whale", "FALSE")
         updated += 1
 
     db.write_csv(cfg.WALLETS_FILE, db.wallet_headers(), wallets)
@@ -210,3 +211,83 @@ def sanitize_existing_data() -> Dict[str, int]:
 
     logger.info("Sanitize done: %s", stats)
     return stats
+
+
+def qualifies_as_whale(wallet: Dict) -> bool:
+    """Check whale promotion rules."""
+    wins = _safe_int(wallet.get("winning_sells"))
+    win_rate = _safe_float(wallet.get("win_rate"))
+    score = _safe_float(wallet.get("score"))
+    trades = _safe_int(wallet.get("total_trades"))
+
+    if wins < cfg.WHALE_MIN_WINNING_SELLS:
+        return False
+    if win_rate < cfg.WHALE_MIN_WIN_RATE:
+        return False
+    if score < cfg.WHALE_MIN_SCORE:
+        return False
+    if trades < cfg.WHALE_MIN_TRADES:
+        return False
+
+    last = wallet.get("last_seen") or ""
+    if last:
+        try:
+            dt = datetime.fromisoformat(last.replace("Z", "+00:00").split("+")[0])
+            age = (datetime.now(timezone.utc).replace(tzinfo=None) - dt).days
+            if age > cfg.WHALE_MAX_INACTIVE_DAYS:
+                return False
+        except Exception:
+            pass
+    return True
+
+
+def promote_whales() -> List[Dict]:
+    """
+    Promote qualifying wallets to whales.csv.
+    Returns list of NEWLY promoted whales (for Telegram alerts).
+    """
+    wallets = db.read_csv(cfg.WALLETS_FILE, db.wallet_headers())
+    existing = db.get_whale_addresses()
+    newly = []
+
+    for w in wallets:
+        addr = (w.get("address") or "").lower()
+        if not addr or addr in existing:
+            # still refresh metrics on existing whales
+            if addr in existing:
+                db.upsert_whale({
+                    "address": addr,
+                    "chain": w.get("chain") or "ethereum",
+                    "score": w.get("score") or "0",
+                    "win_rate": w.get("win_rate") or "0",
+                    "winning_sells": w.get("winning_sells") or "0",
+                    "total_trades": w.get("total_trades") or "0",
+                    "avg_profit": w.get("avg_profit") or "0",
+                    "status": "active",
+                })
+                w["is_whale"] = "TRUE"
+            continue
+
+        if qualifies_as_whale(w):
+            now = db.now_iso()
+            db.upsert_whale({
+                "address": addr,
+                "chain": w.get("chain") or "ethereum",
+                "promoted_at": now,
+                "last_checked": now,
+                "score": w.get("score") or "0",
+                "win_rate": w.get("win_rate") or "0",
+                "winning_sells": w.get("winning_sells") or "0",
+                "total_trades": w.get("total_trades") or "0",
+                "avg_profit": w.get("avg_profit") or "0",
+                "status": "active",
+            })
+            w["is_whale"] = "TRUE"
+            newly.append(dict(w))
+            logger.info("🐋 Promoted to whale: %s (score=%s wins=%s)", addr[:12], w.get("score"), w.get("winning_sells"))
+        else:
+            w["is_whale"] = "FALSE"
+
+    db.write_csv(cfg.WALLETS_FILE, db.wallet_headers(), wallets)
+    logger.info("Whale promotion done. New whales: %d | Total active: %d", len(newly), len(db.get_whale_addresses()))
+    return newly
