@@ -16,6 +16,7 @@ WHITELIST_FILE = os.path.join(DATA_DIR, "whitelist.csv")
 
 MAX_AGE_DAYS = 30
 MIN_SCORE_FOR_WHITELIST = 70
+MAX_REASONABLE_PROFIT = 200  # ✅ محدودیت سود منطقی برای امتیازدهی
 
 # ==================== توابع CSV ====================
 
@@ -41,10 +42,13 @@ def get_whitelist_headers():
     return ["rank", "wallet_address", "chain", "score",
             "total_trades", "win_rate", "avg_profit", "last_seen"]
 
-# ==================== محاسبه امتیاز ====================
+# ==================== محاسبه امتیاز (اصلاح‌شده) ====================
 
 def calculate_score(wallet):
-    """محاسبه امتیاز کیف پول بر اساس فروش‌های انجام شده"""
+    """
+    محاسبه امتیاز کیف پول بر اساس فروش‌های انجام شده
+    ✅ اصلاح: محدود کردن avg_profit به بازه منطقی
+    """
     total_trades = int(wallet.get("total_trades", 0))
     total_sells = int(wallet.get("total_sells", 0))
     winning_sells = int(wallet.get("winning_sells", 0))
@@ -65,6 +69,11 @@ def calculate_score(wallet):
     total_profit = sum(float(s.get("profit_percent", 0)) for s in wallet_sells)
     avg_profit = total_profit / total_sells if total_sells > 0 else 0
     
+    # ✅ محدود کردن avg_profit به بازه منطقی (۰ تا ۲۰۰)
+    if avg_profit > MAX_REASONABLE_PROFIT:
+        print(f"⚠️ avg_profit غیرطبیعی ({avg_profit:.2f}) برای {wallet.get('address', '')[:10]}... محدود به {MAX_REASONABLE_PROFIT} شد.")
+        avg_profit = MAX_REASONABLE_PROFIT
+    
     # ۳. مدت زمان نگهداری
     total_duration = sum(float(s.get("hold_duration_hours", 0)) for s in wallet_sells)
     avg_duration = total_duration / total_sells if total_sells > 0 else 0
@@ -73,8 +82,8 @@ def calculate_score(wallet):
     partial_sells = sum(1 for s in wallet_sells if float(s.get("sell_percent", 0)) < 100)
     capital_management_score = (partial_sells / total_trades) * 10 if total_trades > 0 else 0
     
-    # ۵. امتیاز زمان‌بندی
-    timing_score = (avg_profit / (avg_duration + 1)) * 10 if avg_duration > 0 else 0
+    # ۵. امتیاز زمان‌بندی (اگر avg_duration صفر باشد، از مقدار ۱ استفاده می‌شود)
+    timing_score = (avg_profit / (avg_duration + 1)) * 10 if avg_duration >= 0 else 0
     
     # ۶. امتیاز نهایی
     score = (win_rate * 0.45) + (avg_profit * 0.30) + (timing_score * 0.15) + (capital_management_score * 0.10)
