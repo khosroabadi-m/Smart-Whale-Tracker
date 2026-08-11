@@ -1,127 +1,100 @@
-#!/usr/bin/env python3
-"""Crypto Wallet Bot – discovery scanner."""
-import logging
-import sys
-import time
-from datetime import datetime, timezone
+"""
+Central configuration for Crypto Wallet Bot + Whale tracker.
+"""
+import os
 
-import config as cfg
-import db
-import apis
-import telegram_utils as tg
+# ==================== Secrets ====================
+TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN", "")
+CHAT_ID = os.getenv("CHAT_ID", "")
+ETHERSCAN_API_KEY = os.getenv("ETHERSCAN_API_KEY", "")
+BSCSCAN_API_KEY = os.getenv("BSCSCAN_API_KEY", "")
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(message)s",
-    datefmt="%H:%M:%S",
-)
-logger = logging.getLogger("bot")
+# ==================== Paths ====================
+DATA_DIR = "data"
+WALLETS_FILE = os.path.join(DATA_DIR, "wallets.csv")
+TRADES_FILE = os.path.join(DATA_DIR, "trades.csv")
+SELLS_FILE = os.path.join(DATA_DIR, "sells.csv")
+WHITELIST_FILE = os.path.join(DATA_DIR, "whitelist.csv")
+WHALES_FILE = os.path.join(DATA_DIR, "whales.csv")
+ALERTS_FILE = os.path.join(DATA_DIR, "whale_alerts.csv")
 
+# ==================== DexScreener filters ====================
+MIN_LIQUIDITY_USD = 15_000
+MIN_VOLUME_24H_USD = 3_000
+MIN_CHANGE_24H = 5.0
+MAX_CHANGE_24H = 300.0
+MAX_CATEGORIES = 8
+MAX_TOKENS_TO_CHECK = 12
+REPORT_COUNT = 5              # discovery signals per bot run (early buyers)
 
-def validate_env() -> bool:
-    ok = True
-    if not cfg.TELEGRAM_TOKEN or not cfg.CHAT_ID:
-        logger.warning("TELEGRAM_TOKEN / CHAT_ID missing – dry-run only")
-    if not cfg.ETHERSCAN_API_KEY:
-        logger.error("ETHERSCAN_API_KEY is required")
-        ok = False
-    if not cfg.BSCSCAN_API_KEY:
-        logger.warning("BSCSCAN_API_KEY missing – BSC limited")
-    return ok
+# ==================== Early buyer detection ====================
+MAX_EARLY_BUYERS = 8
+MIN_BUY_AMOUNT_TOKENS = 1.0
+BLACKLIST_ADDRESSES = {
+    "0x0000000000000000000000000000000000000000",
+    "0x000000000000000000000000000000000000dead",
+    "0x0000000000000000000000000000000000000001",
+    "0x7a250d5630b4cf539739df2c5dacb4c659f2488d",  # Uniswap V2
+    "0xe592427a0aece92de3edee1f18e0157c05861564",  # Uniswap V3
+    "0x68b3465833fb72a70ecdf485e0e4c7bd8665fc45",
+    "0xd9e1ce17f2641f24ae83637ab66a2cca9c378b9f",  # Sushi
+    "0x1111111254eeb25477b68fb85ed929f73a960582",  # 1inch
+    "0x1111111254fb6c44bac0bed2854e76f90643097d",
+}
 
+# ==================== Chain support ====================
+CHAIN_MAP = {
+    "ethereum": 1, "eth": 1,
+    "bsc": 56, "bnb": 56,
+    "polygon": 137,
+    "arbitrum": 42161,
+    "base": 8453,
+    "optimism": 10,
+    "linea": 59144,
+    "celo": 42220,
+    "gnosis": 100,
+    "avalanche": 43114,
+    "fantom": 250,
+}
+SUPPORTED_CHAINS = set(CHAIN_MAP.keys())
 
-def process_token(token: dict) -> tuple:
-    contract = token.get("contract") or ""
-    chain = (token.get("chain") or "").lower()
-    if not contract or len(contract) < 10:
-        return [], 0
+# ==================== Sell / performance ====================
+MIN_HOLD_HOURS = 0.5
+MAX_REASONABLE_PROFIT = 80.0
+MIN_PROFIT_FOR_WIN = 15.0
+MIN_LOSS_FOR_LOSS = -8.0
 
-    buyers = apis.find_early_buyers(contract, chain)
-    if not buyers:
-        logger.info("  no early buyers for %s", token.get("symbol"))
-        return [], 0
+# ==================== Scoring & whitelist ====================
+MIN_SCORE_FOR_WHITELIST = 55.0
+MIN_TRADES_FOR_WHITELIST = 3
+MIN_SELLS_FOR_SCORE = 1
+MAX_AGE_DAYS = 45
 
-    new_count = 0
-    recorded = []
-    for b in buyers:
-        addr = b["address"]
-        if db.is_blacklisted(addr):
-            continue
-        trade_id = db.add_trade(
-            wallet_address=addr,
-            token_info=token,
-            price=float(token.get("price") or 0),
-            chain=chain,
-        )
-        if trade_id:
-            new_count += 1
-            recorded.append(b)
-            logger.info("  trade recorded: %s… for %s", addr[:10], token.get("symbol"))
+WEIGHT_WIN_RATE = 0.45
+WEIGHT_AVG_PROFIT = 0.25
+WEIGHT_TIMING = 0.15
+WEIGHT_ACTIVITY = 0.15
 
-    return recorded or buyers, new_count
+# ==================== Whale promotion rules ====================
+# A wallet becomes a WHALE when ALL of these are true:
+WHALE_MIN_WINNING_SELLS = 2      # at least N profitable verified sells
+WHALE_MIN_WIN_RATE = 60.0        # %
+WHALE_MIN_SCORE = 55.0
+WHALE_MIN_TRADES = 3
+WHALE_MAX_INACTIVE_DAYS = 30     # must have been seen recently
 
+# Whale monitoring
+WHALE_MONITOR_MAX = 40           # max whales to scan per nightly run (rate-limit)
+WHALE_LOOKBACK_HOURS = 36        # how far back to look for new transfers
+WHALE_MIN_TRANSFER_USD = 50.0    # ignore dust buys/sells when pricing available
+SEND_DISCOVERY_SIGNALS = True    # early-buyer signals from bot.py (weaker signals)
 
-def main() -> int:
-    print("=" * 60)
-    print(f"🚀 Scan started {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')} UTC")
-    print("=" * 60)
+# ==================== API ====================
+DEXSCREENER_TRENDING = "https://api.dexscreener.com/metas/trending/v1"
+DEXSCREENER_META = "https://api.dexscreener.com/metas/meta/v1"
+DEXSCREENER_TOKEN = "https://api.dexscreener.com/latest/dex/tokens/{address}"
+DEXSCREENER_SEARCH = "https://api.dexscreener.com/latest/dex/search?q={query}"
+ETHERSCAN_V2 = "https://api.etherscan.io/v2/api"
 
-    if not validate_env():
-        return 1
-
-    db.ensure_data_dir()
-    start = time.time()
-
-    gainers = apis.fetch_gainers()
-    if not gainers:
-        logger.info("No quality gainers found")
-        tg.send_message(
-            "🤖 *گزارش اجرای ربات*\n\n"
-            "در این اجرا توکن باکیفیتی پیدا نشد\\.\n"
-            f"⏰ {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}"
-        )
-        return 0
-
-    logger.info("Top gainers to inspect: %d", min(cfg.MAX_TOKENS_TO_CHECK, len(gainers)))
-
-    valid = []
-    new_trades = 0
-    for token in gainers[: cfg.MAX_TOKENS_TO_CHECK]:
-        symbol = token.get("symbol", "?")
-        chain = token.get("chain", "?")
-        logger.info("Checking %s on %s (Δ24h=%.1f%%)", symbol, chain, token.get("change_24h", 0))
-        buyers, added = process_token(token)
-        new_trades += added
-        if buyers:
-            valid.append((token, buyers))
-            logger.info("  → %d early buyers", len(buyers))
-
-    whitelist = db.get_whitelist_addresses()
-    whales = db.get_whale_addresses()
-    logger.info(
-        "Summary: quality=%d | with_buyers=%d | new_trades=%d | whales=%d | wl=%d",
-        len(gainers), len(valid), new_trades, len(whales), len(whitelist),
-    )
-
-    if cfg.SEND_DISCOVERY_SIGNALS:
-        report_n = min(cfg.REPORT_COUNT, len(valid))
-        for token, buyers in valid[:report_n]:
-            is_wl = any(b.get("address", "").lower() in whitelist for b in buyers)
-            msg = tg.format_discovery_signal(token, buyers, is_wl)
-            tg.send_message(msg)
-            time.sleep(2.5)
-
-    tg.send_message(tg.format_bot_run_report({
-        "total_tokens": len(gainers),
-        "valid_tokens": len(valid),
-        "new_wallets": new_trades,
-        "whale_count": len(whales),
-        "whitelist_count": len(whitelist),
-    }))
-
-    print(f"✅ Done in {time.time() - start:.1f}s")
-    return 0
-
-
-if __name__ == "__main__":
-    sys.exit(main())
+REQUEST_TIMEOUT = 18
+API_SLEEP = 0.4
