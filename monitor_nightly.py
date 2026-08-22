@@ -1,16 +1,20 @@
 #!/usr/bin/env python3
 """
 Nightly job:
-1. Detect on-chain sells for open trades
+1. Detect on-chain sells for open trades (with contract only)
 2. Recalculate scores
 3. Promote whales
 4. Monitor whale buy/sell activity
-5. Send detailed Telegram reports
+5. Structured nightly log (retained ~30 days)
+6. Send detailed Telegram reports
 """
+import csv
 import logging
+import os
 import sys
 import time
 from datetime import datetime, timezone, timedelta
+from typing import Dict, List, Any
 
 import config as cfg
 import db
@@ -30,28 +34,132 @@ def _parse_iso(s: str) -> datetime:
     return datetime.fromisoformat(s.replace("Z", "+00:00").split("+")[0])
 
 
-def process_open_trades(max_trades: int = 40) -> int:
-    open_trades = db.get_open_trades()
-    # prefer trades that HAVE contract (new system)
-    with_c = [t for t in open_trades if (t.get("contract") or "").strip()]
-    without = [t for t in open_trades if not (t.get("contract") or "").strip()]
-    # process ones with contract first, then legacy limited
-    ordered = with_c + without
-    ordered.sort(key=lambda t: t.get("buy_date") or "")
-    ordered = ordered[:max_trades]
+# -------------------- Nightly structured log --------------------
 
-    new_sells = 0
-    logger.info("Checking %d open trades for sells (with_contract=%d)…", len(ordered), len(with_c))
+def _nightly_log_headers() -> List[str]:
+    return [
+        "run_id", "started_at", "finished_at",
+        "open_with_contract", "checked", "skipped_no_contract",
+        "sell_detected", "sell_recorded", "sell_no_price", "sell_below_threshold",
+        "api_empty_transfers", "errors",
+        "new_whales", "whale_events", "notes",
+    ]
+
+
+def append_nightly_log(row: Dict[str, Any]) -> None:
+    db.ensure_data_dir()
+    path = cfg.NIGHTLY_LOG_FILE
+    headers = _nightly_log_headers()
+    exists = os.path.exists(path) and os.path.getsize(path) > 0
+    # also write per-run jsonl under data/logs for detail
+    os.makedirs(cfg.LOGS_DIR, exist_ok=True)
+    with open(path, "a", encoding="utf-8", newline="") as f:
+        w = csv.DictWriter(f, fieldnames=headers, extrasaction="ignore")
+        if not exists:
+            w.writeheader()
+        clean = {h: row.get(h, "") for h in headers}
+        w.writerow(clean)
+
+
+def cleanup_old_logs() -> int:
+    """Delete nightly detail files older than retention; trim CSV by date."""
+    removed = 0
+    retention = getattr(cfg, "NIGHTLY_LOG_RETENTION_DAYS", 30)
+    cutoff = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=retention)
+
+    logs_dir = getattr(cfg, "LOGS_DIR", os.path.join(cfg.DATA_DIR, "logs"))
+    if os.path.isdir(logs_dir):
+        for name in os.listdir(logs_dir):
+            fp = os.path.join(logs_dir, name)
+            if not os.path.isfile(fp):
+                continue
+            try:
+                mtime = datetime.fromtimestamp(os.path.getmtime(fp))
+                if mtime < cutoff:
+                    os.unlink(fp)
+                    removed += 1
+            except Exception:
+                continue
+
+    # trim aggregate CSV
+    path = cfg.NIGHTLY_LOG_FILE
+    if os.path.exists(path):
+        rows = db.read_csv(path, _nightly_log_headers())
+        kept = []
+        for r in rows:
+            try:
+                dt = _parse_iso(r.get("started_at") or "")
+                if dt >= cutoff:
+                    kept.append(r)
+            except Exception:
+                kept.append(r)
+        if len(kept) != len(rows):
+            db.write_csv(path, _nightly_log_headers(), kept)
+            removed += len(rows) - len(kept)
+    return removed
+
+
+def write_run_detail(run_id: str, lines: List[str]) -> None:
+    os.makedirs(cfg.LOGS_DIR, exist_ok=True)
+    fp = os.path.join(cfg.LOGS_DIR, f"nightly_{run_id}.log")
+    with open(fp, "w", encoding="utf-8") as f:
+        f.write("\n".join(lines) + "\n")
+
+
+# -------------------- Sell scan --------------------
+
+def process_open_trades(max_trades: int = None) -> Dict[str, int]:
+    """
+    Only check OPEN trades that have a real contract.
+    Oldest first. Returns counters for logging.
+    """
+    if max_trades is None:
+        max_trades = getattr(cfg, "MAX_TRADES_PER_NIGHTLY", 80)
+
+    open_trades = db.get_open_trades()
+    with_c = [
+        t for t in open_trades
+        if (t.get("contract") or "").strip().startswith("0x")
+        and len((t.get("contract") or "").strip()) >= 10
+    ]
+    without = len(open_trades) - len(with_c)
+
+    with_c.sort(key=lambda t: t.get("buy_date") or "")
+    ordered = with_c[:max_trades]
+
+    counters = {
+        "open_with_contract": len(with_c),
+        "checked": 0,
+        "skipped_no_contract": without,
+        "sell_detected": 0,
+        "sell_recorded": 0,
+        "sell_no_price": 0,
+        "sell_below_threshold": 0,
+        "api_empty_transfers": 0,
+        "errors": 0,
+    }
+    detail: List[str] = []
+
+    logger.info(
+        "Checking %d/%d open trades with contract (skipped_no_contract=%d)…",
+        len(ordered), len(with_c), without,
+    )
+    detail.append(f"queue={len(ordered)} with_contract_total={len(with_c)} legacy_skipped={without}")
 
     for trade in ordered:
-        wallet = trade.get("wallet_address") or ""
-        contract = trade.get("contract") or ""
-        chain = trade.get("chain") or "ethereum"
+        counters["checked"] += 1
+        wallet = (trade.get("wallet_address") or "").lower()
+        contract = (trade.get("contract") or "").strip().lower()
+        chain = (trade.get("chain") or "ethereum").lower()
         token = trade.get("token") or ""
         trade_id = trade.get("trade_id") or ""
-        buy_price = float(trade.get("buy_price") or 0)
+        try:
+            buy_price = float(trade.get("buy_price") or 0)
+        except Exception:
+            buy_price = 0.0
 
         if not wallet or not contract or buy_price <= 0:
+            counters["errors"] += 1
             continue
         if db.is_blacklisted(wallet):
             continue
@@ -60,19 +168,37 @@ def process_open_trades(max_trades: int = 40) -> int:
             buy_dt = _parse_iso(trade["buy_date"])
             buy_ts = int(buy_dt.timestamp())
         except Exception:
+            counters["errors"] += 1
             continue
 
         hold_hours = (datetime.now(timezone.utc).replace(tzinfo=None) - buy_dt).total_seconds() / 3600.0
         if hold_hours < cfg.MIN_HOLD_HOURS:
             continue
 
-        sell_info = apis.detect_onchain_sell(wallet, contract, chain, buy_ts)
-        if not sell_info or sell_info["sold_percent"] < 10:
+        try:
+            sell_info = apis.detect_onchain_sell(wallet, contract, chain, buy_ts)
+        except Exception as e:
+            counters["errors"] += 1
+            detail.append(f"ERR detect {token} {wallet[:10]}: {e}")
             continue
 
+        if not sell_info:
+            counters["api_empty_transfers"] += 1
+            continue
+
+        if sell_info.get("sold_percent", 0) < 10:
+            counters["sell_below_threshold"] += 1
+            detail.append(
+                f"below10% {token} {wallet[:10]} sold={sell_info.get('sold_percent'):.1f}"
+            )
+            continue
+
+        counters["sell_detected"] += 1
         current_price = apis.get_token_price(contract, chain)
         if current_price is None or current_price <= 0:
+            counters["sell_no_price"] += 1
             logger.info("Sell detected but no price for %s – skip", token)
+            detail.append(f"no_price {token} {wallet[:10]}")
             continue
 
         profit = ((current_price - buy_price) / buy_price) * 100.0
@@ -89,21 +215,24 @@ def process_open_trades(max_trades: int = 40) -> int:
             token=token,
             contract=contract,
             sell_price=current_price,
-            sell_percent=min(100.0, sell_info["sold_percent"]),
+            sell_percent=min(100.0, float(sell_info["sold_percent"])),
             profit_percent=profit,
             is_winning=is_winning,
             hold_duration=hold_hours,
             verified_onchain=True,
         )
         if sid:
-            new_sells += 1
-            logger.info(
-                "On-chain sell: %s %s profit=%.1f%% hold=%.1fh",
-                token, wallet[:10], profit, hold_hours,
+            counters["sell_recorded"] += 1
+            msg = (
+                f"SELL {token} {wallet[:10]} profit={profit:.1f}% "
+                f"hold={hold_hours:.1f}h sold={sell_info['sold_percent']:.1f}%"
             )
+            logger.info("On-chain sell: %s", msg)
+            detail.append(msg)
         time.sleep(0.2)
 
-    return new_sells
+    counters["_detail"] = detail
+    return counters
 
 
 def monitor_whales() -> int:
@@ -131,7 +260,6 @@ def monitor_whales() -> int:
             since_ts = int(_parse_iso(last_checked).timestamp()) if last_checked else default_since
         except Exception:
             since_ts = default_since
-        # never look further than lookback
         since_ts = max(since_ts, default_since)
 
         events = apis.parse_whale_activity(addr, chain, since_ts)
@@ -148,10 +276,11 @@ def monitor_whales() -> int:
             if ev["type"] == "buy":
                 msg = tg.format_whale_buy(w, ev, price=price)
                 tg.send_message(msg)
-                db.add_alert("buy", addr, ev.get("token_symbol", ""), ev.get("contract", ""),
-                             chain, ev.get("amount", 0), price, ev.get("hash", ""),
-                             notes="whale buy")
-                # also record as trade for future sell tracking
+                db.add_alert(
+                    "buy", addr, ev.get("token_symbol", ""), ev.get("contract", ""),
+                    chain, ev.get("amount", 0), price, ev.get("hash", ""),
+                    notes="whale buy",
+                )
                 db.add_trade(
                     wallet_address=addr,
                     token_info={
@@ -167,7 +296,6 @@ def monitor_whales() -> int:
 
             elif ev["type"] == "sell":
                 profit = None
-                # try match open trade for profit estimate
                 for t in db.get_open_trades():
                     if (t.get("wallet_address") or "").lower() != addr:
                         continue
@@ -183,9 +311,11 @@ def monitor_whales() -> int:
 
                 msg = tg.format_whale_sell(w, ev, price=price, profit_pct=profit)
                 tg.send_message(msg)
-                db.add_alert("sell", addr, ev.get("token_symbol", ""), ev.get("contract", ""),
-                             chain, ev.get("amount", 0), price, ev.get("hash", ""),
-                             notes=f"profit={profit}")
+                db.add_alert(
+                    "sell", addr, ev.get("token_symbol", ""), ev.get("contract", ""),
+                    chain, ev.get("amount", 0), price, ev.get("hash", ""),
+                    notes=f"profit={profit}",
+                )
                 events_alerted += 1
                 time.sleep(2.0)
 
@@ -197,15 +327,22 @@ def monitor_whales() -> int:
 
 
 def main() -> int:
+    started = datetime.now(timezone.utc).replace(tzinfo=None)
+    run_id = started.strftime("%Y%m%d_%H%M%S")
     print("=" * 60)
-    print(f"🌙 Nightly started {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')} UTC")
+    print(f"🐋 Smart Whale Tracker · Nightly started {started.strftime('%Y-%m-%d %H:%M:%S')} UTC")
     print("=" * 60)
 
     db.ensure_data_dir()
+    os.makedirs(cfg.LOGS_DIR, exist_ok=True)
+
     scoring.sanitize_existing_data()
 
-    new_sells = process_open_trades()
-    logger.info("New sells recorded: %d", new_sells)
+    sell_stats = process_open_trades()
+    new_sells = sell_stats.get("sell_recorded", 0)
+    logger.info("New sells recorded: %d | detected=%d | no_price=%d | empty_api=%d",
+                new_sells, sell_stats.get("sell_detected", 0),
+                sell_stats.get("sell_no_price", 0), sell_stats.get("api_empty_transfers", 0))
 
     scoring.update_all_scores()
     scoring.cleanup_old_wallets()
@@ -216,7 +353,7 @@ def main() -> int:
         tg.send_message(tg.format_whale_promoted(w))
         db.add_alert(
             "promote", w.get("address", ""), "", "", w.get("chain", "ethereum"),
-            0, 0, f"promote_{w.get('address','')[:10]}", notes="promoted to whale",
+            0, 0, f"promote_{w.get('address', '')[:10]}", notes="promoted to whale",
         )
         time.sleep(2.0)
 
@@ -233,6 +370,39 @@ def main() -> int:
         "total_whales": len([w for w in whales if (w.get("status") or "active") == "active"]),
         "total_whitelist": len(whitelist),
     }, top, new_whales=len(newly), whale_events=whale_events))
+
+    finished = datetime.now(timezone.utc).replace(tzinfo=None)
+    detail_lines = sell_stats.pop("_detail", [])
+    write_run_detail(run_id, [
+        f"run_id={run_id}",
+        f"started={started.isoformat()}",
+        f"finished={finished.isoformat()}",
+        f"stats={sell_stats}",
+        f"new_whales={len(newly)}",
+        f"whale_events={whale_events}",
+        "--- detail ---",
+        *detail_lines[:200],
+    ])
+    append_nightly_log({
+        "run_id": run_id,
+        "started_at": started.isoformat(),
+        "finished_at": finished.isoformat(),
+        "open_with_contract": sell_stats.get("open_with_contract", 0),
+        "checked": sell_stats.get("checked", 0),
+        "skipped_no_contract": sell_stats.get("skipped_no_contract", 0),
+        "sell_detected": sell_stats.get("sell_detected", 0),
+        "sell_recorded": sell_stats.get("sell_recorded", 0),
+        "sell_no_price": sell_stats.get("sell_no_price", 0),
+        "sell_below_threshold": sell_stats.get("sell_below_threshold", 0),
+        "api_empty_transfers": sell_stats.get("api_empty_transfers", 0),
+        "errors": sell_stats.get("errors", 0),
+        "new_whales": len(newly),
+        "whale_events": whale_events,
+        "notes": f"detail=data/logs/nightly_{run_id}.log",
+    })
+    removed_logs = cleanup_old_logs()
+    if removed_logs:
+        logger.info("Cleaned %d old log entries/files", removed_logs)
 
     print("✅ Nightly finished")
     return 0
