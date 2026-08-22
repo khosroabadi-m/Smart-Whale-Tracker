@@ -160,12 +160,20 @@ def cleanup_old_wallets() -> int:
 
 def sanitize_existing_data() -> Dict[str, int]:
     """
-    One-time style cleanup:
-    - remove blacklisted addresses from wallets/trades/sells
-    - cap absurd profits
-    - drop sells with tiny hold duration that look fake
+    Cleanup:
+    - remove blacklisted wallets/trades/sells
+    - remove trades with empty/invalid contract
+    - for open trades: keep only newest per wallet+contract (drop older dups)
+    - cap absurd sell profits / drop fake near-zero holds
     """
-    stats = {"wallets_removed": 0, "sells_capped": 0, "sells_removed": 0, "trades_removed": 0}
+    stats = {
+        "wallets_removed": 0,
+        "sells_capped": 0,
+        "sells_removed": 0,
+        "trades_removed": 0,
+        "trades_no_contract": 0,
+        "trades_dup_open": 0,
+    }
 
     # wallets
     wallets = db.read_csv(cfg.WALLETS_FILE, db.wallet_headers())
@@ -187,7 +195,6 @@ def sanitize_existing_data() -> Dict[str, int]:
             stats["sells_removed"] += 1
             continue
         hold = _safe_float(s.get("hold_duration_hours"))
-        # remove obviously fake near-zero holds from old broken logic
         if hold < 0.001 and (s.get("verified_onchain") or "").upper() != "TRUE":
             stats["sells_removed"] += 1
             continue
@@ -198,16 +205,58 @@ def sanitize_existing_data() -> Dict[str, int]:
         clean_s.append(s)
     db.write_csv(cfg.SELLS_FILE, db.sell_headers(), clean_s)
 
-    # trades
+    # trades: drop blacklist + empty contract, then dedupe open by wallet+contract
     trades = db.read_csv(cfg.TRADES_FILE, db.trade_headers())
-    clean_t = []
+    step1 = []
     for t in trades:
         addr = (t.get("wallet_address") or "").lower()
         if db.is_blacklisted(addr):
             stats["trades_removed"] += 1
             continue
-        clean_t.append(t)
-    db.write_csv(cfg.TRADES_FILE, db.trade_headers(), clean_t)
+        contract = (t.get("contract") or "").strip().lower()
+        if not contract or not contract.startswith("0x") or len(contract) < 10:
+            stats["trades_no_contract"] += 1
+            continue
+        t["contract"] = contract
+        t["wallet_address"] = addr
+        step1.append(t)
+
+    # keep newest open per (wallet, contract); keep all closed/partial as-is but still one open max
+    from collections import defaultdict
+    best_open = {}  # (wallet, contract) -> trade with latest buy_date
+    others = []
+    for t in step1:
+        status = (t.get("status") or "").strip()
+        key = (t.get("wallet_address", ""), t.get("contract", ""))
+        if status in ("open", "partially_sold"):
+            prev = best_open.get(key)
+            if prev is None:
+                best_open[key] = t
+            else:
+                d_new = t.get("buy_date") or ""
+                d_old = prev.get("buy_date") or ""
+                if d_new >= d_old:
+                    others.append(prev)  # will count as dup; actually we discard old
+                    stats["trades_dup_open"] += 1
+                    best_open[key] = t
+                else:
+                    stats["trades_dup_open"] += 1
+                    # keep prev, drop t
+        else:
+            others.append(t)
+
+    # others may still contain older opens we marked — filter those out
+    open_keys = set(best_open.keys())
+    final = list(best_open.values())
+    for t in others:
+        status = (t.get("status") or "").strip()
+        key = (t.get("wallet_address", ""), t.get("contract", ""))
+        if status in ("open", "partially_sold") and key in open_keys:
+            continue  # duplicate open already handled
+        final.append(t)
+
+    db.write_csv(cfg.TRADES_FILE, db.trade_headers(), final)
+    stats["trades_removed"] += stats["trades_no_contract"] + stats["trades_dup_open"]
 
     logger.info("Sanitize done: %s", stats)
     return stats
