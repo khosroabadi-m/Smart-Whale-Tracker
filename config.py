@@ -20,7 +20,7 @@ ALERTS_FILE = os.path.join(DATA_DIR, "whale_alerts.csv")
 LOGS_DIR = os.path.join(DATA_DIR, "logs")
 NIGHTLY_LOG_FILE = os.path.join(DATA_DIR, "nightly_log.csv")
 NIGHTLY_LOG_RETENTION_DAYS = 30
-MAX_TRADES_PER_NIGHTLY = 80  # open trades with contract to check
+MAX_TRADES_PER_NIGHTLY = 500  # open trades with contract to check
 
 # ==================== DexScreener filters ====================
 MIN_LIQUIDITY_USD = 15_000
