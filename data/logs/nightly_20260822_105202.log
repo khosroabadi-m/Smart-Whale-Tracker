@@ -1,0 +1,8 @@
+run_id=20260822_105202
+started=2026-08-22T10:52:02.105759
+finished=2026-08-22T10:54:41.228974
+stats={'open_with_contract': 240, 'checked': 240, 'skipped_no_contract': 0, 'sell_detected': 0, 'sell_recorded': 0, 'sell_no_price': 0, 'sell_below_threshold': 0, 'api_empty_transfers': 240, 'errors': 0}
+new_whales=0
+whale_events=0
+--- detail ---
+queue=240 with_contract_total=240 legacy_skipped=0
