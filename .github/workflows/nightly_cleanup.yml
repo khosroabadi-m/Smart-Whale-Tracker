@@ -40,5 +40,5 @@ jobs:
         uses: stefanzweifel/git-auto-commit-action@v5
         with:
           commit_message: "chore: nightly scores, sells & cleanup"
-          file_pattern: data/*.csv
+          file_pattern: data/**/*.csv data/**/*.log data/*.csv
           skip_dirty_check: false
