@@ -1,0 +1,5 @@
+2026-08-22 10:44:30,788 [INFO] Loading 956 trades and 273 wallets...
+2026-08-22 10:44:30,790 [INFO] Sanitize done: 716 trades removed, 468 no contract, 248 dup open
+2026-08-22 10:44:30,790 [INFO] Trades: 956 → 240 (with_contract=240)
+2026-08-22 10:44:30,790 [INFO] Wallets: 273
+2026-08-22 10:44:30,790 [INFO] ✅ Fix historical data finished in 0.0s
