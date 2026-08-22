@@ -38,7 +38,7 @@ class TestDB(unittest.TestCase):
     def test_add_trade_and_wallet(self):
         tid = db.add_trade(
             "0xabc1234567890123456789012345678901234567",
-            {"symbol": "TEST", "name": "Test Token", "contract": "0xcontract123"},
+            {"symbol": "TEST", "name": "Test Token", "contract": "0xcontract12345678901234567890123456789012"},
             0.001,
             "ethereum",
         )
@@ -51,7 +51,7 @@ class TestDB(unittest.TestCase):
     def test_blacklist_blocks_trade(self):
         tid = db.add_trade(
             "0x0000000000000000000000000000000000000000",
-            {"symbol": "X", "name": "X", "contract": "0xabc"},
+            {"symbol": "X", "name": "X", "contract": "0xabcabcabcabcabcabcabcabcabcabcabcabcabca"},
             1.0,
             "ethereum",
         )
@@ -59,8 +59,8 @@ class TestDB(unittest.TestCase):
 
     def test_dedup_trade(self):
         addr = "0xdedup1234567890123456789012345678901234"
-        t1 = db.add_trade(addr, {"symbol": "A", "name": "A", "contract": "0xc1"}, 1.0, "ethereum")
-        t2 = db.add_trade(addr, {"symbol": "A", "name": "A", "contract": "0xc1"}, 1.0, "ethereum")
+        t1 = db.add_trade(addr, {"symbol": "A", "name": "A", "contract": "0xc1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1"}, 1.0, "ethereum")
+        t2 = db.add_trade(addr, {"symbol": "A", "name": "A", "contract": "0xc1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1"}, 1.0, "ethereum")
         self.assertIsNotNone(t1)
         self.assertIsNone(t2)  # same wallet+contract within window
 
@@ -68,7 +68,7 @@ class TestDB(unittest.TestCase):
         addr = "0xsell123456789012345678901234567890123456"
         tid = db.add_trade(
             addr,
-            {"symbol": "TK", "name": "Tok", "contract": "0xctr"},
+            {"symbol": "TK", "name": "Tok", "contract": "0xctrctrctrctrctrctrctrctrctrctrctrctrctr1"},
             0.01,
             "ethereum",
         )
@@ -76,7 +76,7 @@ class TestDB(unittest.TestCase):
             trade_id=tid,
             wallet_address=addr,
             token="TK",
-            contract="0xctr",
+            contract="0xctrctrctrctrctrctrctrctrctrctrctrctrctr1",
             sell_price=0.02,
             sell_percent=100,
             profit_percent=100,
