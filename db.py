@@ -135,10 +135,34 @@ def is_blacklisted(address: str) -> bool:
 
 # ---------- Trade helpers ----------
 
+def has_open_trade(wallet: str, contract: str) -> bool:
+    """True if an OPEN trade already exists for this wallet+contract."""
+    wallet = (wallet or "").lower()
+    contract = (contract or "").lower()
+    if not wallet or not contract:
+        return False
+    for t in read_csv(cfg.TRADES_FILE, trade_headers()):
+        if t.get("wallet_address", "").lower() != wallet:
+            continue
+        if (t.get("contract") or "").lower() != contract:
+            continue
+        if (t.get("status") or "") in ("open", "partially_sold"):
+            return True
+    return False
+
+
 def trade_exists(wallet: str, contract: str, within_hours: float = 24.0) -> bool:
-    """Avoid recording the same wallet+token many times in a short window."""
+    """
+    Block duplicate recording.
+    - Always block if an open trade exists for same wallet+contract.
+    - Also block recent closed trades within within_hours (noise control).
+    """
     wallet = wallet.lower()
     contract = (contract or "").lower()
+    if not contract:
+        return True  # treat empty contract as "exists" so caller skips
+    if has_open_trade(wallet, contract):
+        return True
     now = datetime.now(timezone.utc).replace(tzinfo=None)
     for t in read_csv(cfg.TRADES_FILE, trade_headers()):
         if t.get("wallet_address", "").lower() != wallet:
@@ -165,9 +189,11 @@ def add_trade(
     if is_blacklisted(wallet_address):
         return None
 
-    contract = (token_info.get("contract") or "").lower()
+    contract = (token_info.get("contract") or "").lower().strip()
+    if not contract or not contract.startswith("0x") or len(contract) < 10:
+        return None  # never store trades without a real contract
     if trade_exists(wallet_address, contract, within_hours=48.0):
-        return None  # already tracked recently
+        return None  # open already exists or recent duplicate
 
     trade_id = f"trade_{int(datetime.now(timezone.utc).replace(tzinfo=None).timestamp())}_{wallet_address[:10]}"
     trade_data = {
