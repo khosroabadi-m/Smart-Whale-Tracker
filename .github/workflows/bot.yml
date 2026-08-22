@@ -2,7 +2,6 @@ name: Crypto Wallet Bot
 
 on:
   schedule:
-    # Every 45 minutes between 02:00–20:00 UTC (roughly active market hours)
     - cron: "0,45 2-20 * * *"
   workflow_dispatch:
 
@@ -40,5 +39,5 @@ jobs:
         uses: stefanzweifel/git-auto-commit-action@v5
         with:
           commit_message: "chore: update wallet/trade CSV data"
-          file_pattern: data/**/*.csv data/**/*.log data/*.csv
+          file_pattern: data/
           skip_dirty_check: false
