@@ -195,7 +195,8 @@ WEIGHT_ACTIVITY = 0.15
 WHALE_MIN_WINNING_SELLS = 2      # at least N profitable verified sells
 WHALE_MIN_WIN_RATE = 50.0        # % (lowered from 60 — most good wallets have 1 loss)
 WHALE_MIN_SCORE = 45.0           # lowered from 55 — old formula capped good wallets at ~54
-WHALE_MIN_TRADES = 3
+WHALE_MIN_TRADES = 1             # lowered from 3 — most wallets only bought 1 token
+                                 # (backfill can't find new buys if wallet is single-token buyer)
 WHALE_MAX_INACTIVE_DAYS = 30     # must have been seen recently
 
 # Whale candidate (early-stage wallet that just got 1 verified winning sell)

@@ -1,6 +1,6 @@
 # Smart Whale Tracker
 
-[![Version](https://img.shields.io/badge/version-2.8.0-blue)](./VERSION)
+[![Version](https://img.shields.io/badge/version-2.9.0-blue)](./VERSION)
 [![Python](https://img.shields.io/badge/python-3.11-green)](https://python.org)
 [![License](https://img.shields.io/badge/license-MIT-brightgreen)](./LICENSE)
 
@@ -66,7 +66,7 @@ FIRST winning sell → 🥚 candidate alert + backfill 30 days
 | فروش سودده تأییدشده | ≥ ۲ |
 | WinRate | ≥ ۵۰٪ (نسخه ۲) |
 | Score | ≥ ۴۵ (نسخه ۲) |
-| تعداد معامله | ≥ ۳ |
+| تعداد معامله | ≥ ۱ |
 | آخرین فعالیت | ≤ ۳۰ روز |
 
 ### کاندیدای نهنگ (سیستم جدید)
@@ -112,7 +112,7 @@ dashboard.py           # HTML dashboard generator
 fix_data.py            # پاکسازی داده (دستی)
 config.py / db.py / apis.py / scoring.py / telegram_utils.py
 version.py             # ورژن‌بندی متمرکز (VERSION file را می‌خواند)
-VERSION                # ورژن فعلی (مثلاً 2.8.0)
+VERSION                # ورژن فعلی (مثلاً 2.9.0)
 CHANGELOG.md           # تاریخچه تغییرات
 .gitignore             # data/* را ignore می‌کند (به‌جز .gitkeep)
 data/.gitkeep          # placeholder برای دایرکتوری data/
@@ -169,7 +169,7 @@ python tests/test_logic.py
 WHALE_MIN_WINNING_SELLS = 2      # کم کن برای نهنگ بیشتر
 WHALE_MIN_WIN_RATE = 50.0        # کم کن برای نهنگ بیشتر (با نویز بیشتر)
 WHALE_MIN_SCORE = 45.0           # کم کن برای نهنگ بیشتر
-WHALE_MIN_TRADES = 3
+WHALE_MIN_TRADES = 1             # most wallets only bought 1 token
 WHALE_MAX_INACTIVE_DAYS = 30
 ```
 

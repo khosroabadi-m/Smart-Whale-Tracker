@@ -20,6 +20,53 @@ Each change bumps exactly ONE number and resets the lower ones to 0.
 
 ---
 
+## [2.9.0] — 2026-09-05
+
+### Fixed — CRITICAL (WHALE_MIN_TRADES=3 was impossible to reach)
+
+After v2.8.0, backfill logged "5 sells recorded" but `trades` count stayed at 1 for all
+wallets. The log showed:
+```
+Backfill buys 0x69c7bd26: 2 contracts analyzed, 1 had buys
+```
+
+**Root cause:** `backfill_wallet_buys()` found only 1 contract with buys per wallet —
+the SAME contract we already track. These wallets are **single-token buyers**: they only
+bought 1 token in the last 30 days. The "2 contracts analyzed" includes 1 real token + 1
+base token (WETH/USDC) that gets filtered out.
+
+So `WHALE_MIN_TRADES=3` was **impossible to reach** for these wallets, no matter how many
+nightly runs we do. They have `wins>=2` (good!) but `trades=1` (blocked).
+
+**The fix:** Lowered `WHALE_MIN_TRADES` from 3 to 1.
+- A wallet with `wins>=2` and `trades>=1` now qualifies as whale.
+- This matches reality: most wallets only buy 1 trending token, but if they sold it
+  profitably multiple times (or bought+sold multiple times), they're still skilled.
+
+### Verified with real data (simulation):
+Before v2.9.0: 1 whale
+After v2.9.0: **6 whales** (5 new!):
+```
+🐋 0x69c7bd26512f  score=47.1  wins=3  wr=75%      ← NEW
+🐋 0x7dfc9dd51638  score=54.3  wins=2  wr=100%    ← NEW
+🐋 0x8fbd26a7cb1a  score=50.06 wins=2  wr=100%     ← NEW
+🐋 0xc2eab7d33d3c  score=51.24 wins=2  wr=100%     ← NEW
+🐋 0x69c66beafb06  score=53.54 wins=2  wr=100%     ← NEW
+🐋 0x750874e6fb8d  score=54.19 wins=3  wr=100%     (existing)
+```
+
+### Changed
+- `config.WHALE_MIN_TRADES`: 3 → 1
+- Badge version bumped to 2.9.0
+
+### Migration notes for users
+- **No data migration needed**
+- After upgrading, run `Nightly Monitor & Cleanup` once
+- 5 new whales will be promoted immediately (based on existing data)
+- Telegram alerts will be sent for each new whale 🐋
+
+---
+
 ## [2.8.0] — 2026-09-05
 
 ### Fixed — CRITICAL (backfill only found SAME contracts, no new trades created)
