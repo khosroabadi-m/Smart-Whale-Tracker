@@ -1,0 +1,816 @@
+<!doctype html>
+<html lang="fa" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Smart Whale Tracker — Dashboard</title>
+<style>
+  * { box-sizing: border-box; }
+  body {
+    font-family: 'Vazirmatn', 'Segoe UI', Tahoma, sans-serif;
+    background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%);
+    color: #e2e8f0;
+    margin: 0; padding: 24px;
+    min-height: 100vh;
+  }
+  .container { max-width: 1280px; margin: 0 auto; }
+  h1 {
+    background: linear-gradient(90deg, #06b6d4, #3b82f6);
+    -webkit-background-clip: text; background-clip: text;
+    color: transparent;
+    font-size: 32px; margin: 0 0 4px 0;
+  }
+  .subtitle { color: #94a3b8; font-size: 14px; margin-bottom: 24px; }
+  .grid { display: grid; gap: 16px; }
+  .kpis { grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); }
+  .section {
+    background: rgba(30, 41, 59, 0.6);
+    backdrop-filter: blur(12px);
+    border: 1px solid rgba(148, 163, 184, 0.1);
+    border-radius: 12px;
+    padding: 20px;
+    margin-top: 16px;
+  }
+  .section h2 { margin: 0 0 16px 0; font-size: 20px; color: #f1f5f9; }
+  .kpi-card {
+    background: rgba(30, 41, 59, 0.8);
+    border-radius: 10px;
+    padding: 18px;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.2);
+    transition: transform 0.2s;
+  }
+  .kpi-card:hover { transform: translateY(-2px); }
+  .kpi-label { font-size: 12px; color: #94a3b8; margin-bottom: 6px; }
+  .kpi-value { font-size: 28px; font-weight: 700; color: #f1f5f9; }
+  table.data-table {
+    width: 100%; border-collapse: collapse;
+    font-size: 13px;
+  }
+  .data-table th {
+    text-align: right; padding: 10px 8px;
+    color: #94a3b8; font-weight: 600;
+    border-bottom: 2px solid rgba(148, 163, 184, 0.2);
+    font-size: 11px; text-transform: uppercase;
+  }
+  .data-table td {
+    padding: 10px 8px;
+    border-bottom: 1px solid rgba(148, 163, 184, 0.08);
+  }
+  .data-table a {
+    color: #06b6d4; text-decoration: none;
+    font-family: 'Fira Code', monospace; font-size: 12px;
+  }
+  .data-table a:hover { text-decoration: underline; }
+  .badge {
+    display: inline-block; padding: 2px 6px;
+    border-radius: 4px; font-size: 10px; font-weight: 600;
+    margin-right: 4px;
+  }
+  .whale { background: #06b6d4; color: #0f172a; }
+  .wl { background: #f59e0b; color: #0f172a; }
+  .win { background: #10b981; color: #0f172a; }
+  .loss { background: #ef4444; color: #f1f5f9; }
+  .score-high { color: #10b981; font-weight: 700; }
+  .score-mid { color: #f59e0b; font-weight: 600; }
+  .score-low { color: #64748b; }
+  .profit-pos { color: #10b981; font-weight: 600; }
+  .profit-neg { color: #ef4444; font-weight: 600; }
+  .empty-state {
+    padding: 32px; text-align: center;
+    color: #64748b; font-style: italic;
+  }
+  .chart { margin-top: 8px; }
+  .chart-title { font-size: 13px; color: #94a3b8; margin-bottom: 12px; }
+  .bar-chart {
+    display: flex; align-items: flex-end;
+    gap: 4px; height: 120px;
+    padding: 8px; background: rgba(0,0,0,0.2);
+    border-radius: 8px;
+  }
+  .bar-wrap { flex: 1; display: flex; flex-direction: column; align-items: center; min-width: 0; }
+  .bar {
+    width: 100%; background: linear-gradient(180deg, #06b6d4, #3b82f6);
+    border-radius: 3px 3px 0 0;
+    min-height: 2px;
+  }
+  .bar-label {
+    font-size: 9px; color: #64748b;
+    margin-top: 4px; transform: rotate(0);
+    overflow: hidden; text-overflow: ellipsis;
+    white-space: nowrap; width: 100%; text-align: center;
+  }
+  footer { text-align: center; color: #64748b; font-size: 12px; margin-top: 32px; }
+</style>
+</head>
+<body>
+<div class="container">
+  <h1>🐋 Smart Whale Tracker</h1>
+  <div class="subtitle">داشبورد وضعیت ربات · به‌روزرسانی شده در 2026-09-05 08:21 UTC</div>
+
+  <div class="grid kpis">
+    
+    <div class="kpi-card" style="border-top: 4px solid #3b82f6;">
+      <div class="kpi-label">کیف‌پول‌ها</div>
+      <div class="kpi-value">297</div>
+    </div>
+    
+    
+    <div class="kpi-card" style="border-top: 4px solid #8b5cf6;">
+      <div class="kpi-label">تریدهای باز</div>
+      <div class="kpi-value">233</div>
+    </div>
+    
+    
+    <div class="kpi-card" style="border-top: 4px solid #06b6d4;">
+      <div class="kpi-label">فروش‌ها</div>
+      <div class="kpi-value">79</div>
+    </div>
+    
+    
+    <div class="kpi-card" style="border-top: 4px solid #10b981;">
+      <div class="kpi-label">فروش‌های سودده</div>
+      <div class="kpi-value">34</div>
+    </div>
+    
+    
+    <div class="kpi-card" style="border-top: 4px solid #f59e0b;">
+      <div class="kpi-label">نهنگ‌ها</div>
+      <div class="kpi-value">1</div>
+    </div>
+    
+    
+    <div class="kpi-card" style="border-top: 4px solid #ec4899;">
+      <div class="kpi-label">کاندیدها</div>
+      <div class="kpi-value">8</div>
+    </div>
+    
+    
+    <div class="kpi-card" style="border-top: 4px solid #a855f7;">
+      <div class="kpi-label">آلارم‌ها</div>
+      <div class="kpi-value">12</div>
+    </div>
+    
+  </div>
+
+  <div class="section">
+    <h2>🏆 ۲۰ کیف‌پول برتر</h2>
+    
+    <table class="data-table">
+      <thead>
+        <tr>
+          <th>Wallet</th><th>Chain</th><th>Score</th><th>WinRate</th>
+          <th>Wins/Sells</th><th>Trades</th><th>Avg Profit</th>
+        </tr>
+      </thead>
+      <tbody>
+        
+        <tr>
+          <td><a href="https://etherscan.io/address/0xc56c9d4aee66e16aa4a31a710a6d2fc720a626b6" target="_blank">0xc56c9d…a626b6</a> </td>
+          <td>ethereum</td>
+          <td class="score-high">68.90</td>
+          <td>100.0%</td>
+          <td>3/3</td>
+          <td>1</td>
+          <td>38.98%</td>
+        </tr>
+        
+        <tr>
+          <td><a href="https://etherscan.io/address/0x7dfc9dd51638573a812b39d33eded20df468e7bc" target="_blank">0x7dfc9d…68e7bc</a> </td>
+          <td>ethereum</td>
+          <td class="score-high">61.70</td>
+          <td>100.0%</td>
+          <td>4/4</td>
+          <td>1</td>
+          <td>28.8%</td>
+        </tr>
+        
+        <tr>
+          <td><a href="https://etherscan.io/address/0x69c66beafb06674db41b22cfc50c34a93b8d82a2" target="_blank">0x69c66b…8d82a2</a> </td>
+          <td>ethereum</td>
+          <td class="score-high">58.04</td>
+          <td>100.0%</td>
+          <td>4/4</td>
+          <td>1</td>
+          <td>17.54%</td>
+        </tr>
+        
+        <tr>
+          <td><a href="https://etherscan.io/address/0x750874e6fb8dca30ce41d445e4baf8c76971f912" target="_blank">0x750874…71f912</a> <span class="badge whale">🐋 Whale</span></td>
+          <td>ethereum</td>
+          <td class="score-mid">54.19</td>
+          <td>100.0%</td>
+          <td>3/3</td>
+          <td>1</td>
+          <td>10.08%</td>
+        </tr>
+        
+        <tr>
+          <td><a href="https://etherscan.io/address/0x69c7bd26512f52bf6f76fab834140d13dda673ca" target="_blank">0x69c7bd…a673ca</a> </td>
+          <td>ethereum</td>
+          <td class="score-mid">53.09</td>
+          <td>80.0%</td>
+          <td>4/5</td>
+          <td>1</td>
+          <td>23.66%</td>
+        </tr>
+        
+        <tr>
+          <td><a href="https://etherscan.io/address/0x8fbd26a7cb1ab65834c5ea245aa1f1e78d03ed30" target="_blank">0x8fbd26…03ed30</a> </td>
+          <td>ethereum</td>
+          <td class="score-mid">50.06</td>
+          <td>100.0%</td>
+          <td>2/2</td>
+          <td>1</td>
+          <td>3.88%</td>
+        </tr>
+        
+        <tr>
+          <td><a href="https://etherscan.io/address/0xe2c456b849be4cd14d8422d9868953ac60633e0d" target="_blank">0xe2c456…633e0d</a> </td>
+          <td>ethereum</td>
+          <td class="score-mid">48.10</td>
+          <td>100.0%</td>
+          <td>1/1</td>
+          <td>1</td>
+          <td>3.11%</td>
+        </tr>
+        
+        <tr>
+          <td><a href="https://etherscan.io/address/0xc2eab7d33d3cb97692ecb231a5d0e4a649cb539d" target="_blank">0xc2eab7…cb539d</a> </td>
+          <td>ethereum</td>
+          <td class="score-low">37.84</td>
+          <td>66.67%</td>
+          <td>2/3</td>
+          <td>1</td>
+          <td>6.9%</td>
+        </tr>
+        
+        <tr>
+          <td><a href="https://etherscan.io/address/0x7b73644935b8e68019ac6356c40661e1bc315860" target="_blank">0x7b7364…315860</a> </td>
+          <td>ethereum</td>
+          <td class="score-low">31.75</td>
+          <td>50.0%</td>
+          <td>1/2</td>
+          <td>1</td>
+          <td>16.18%</td>
+        </tr>
+        
+        <tr>
+          <td><a href="https://etherscan.io/address/0xc4704f13d5e08b27b039d53873e813dd2fad99d9" target="_blank">0xc4704f…ad99d9</a> </td>
+          <td>ethereum</td>
+          <td class="score-low">31.74</td>
+          <td>50.0%</td>
+          <td>1/2</td>
+          <td>1</td>
+          <td>16.11%</td>
+        </tr>
+        
+        <tr>
+          <td><a href="https://etherscan.io/address/0x52c77b0cb827afbad022e6d6caf2c44452edbc39" target="_blank">0x52c77b…edbc39</a> </td>
+          <td>ethereum</td>
+          <td class="score-low">31.34</td>
+          <td>50.0%</td>
+          <td>1/2</td>
+          <td>1</td>
+          <td>15.73%</td>
+        </tr>
+        
+        <tr>
+          <td><a href="https://etherscan.io/address/0xf22fdd2be7c6da9788e4941a6ffc78ca99d7b15c" target="_blank">0xf22fdd…d7b15c</a> </td>
+          <td>ethereum</td>
+          <td class="score-low">27.23</td>
+          <td>40.0%</td>
+          <td>2/5</td>
+          <td>1</td>
+          <td>-8.2%</td>
+        </tr>
+        
+        <tr>
+          <td><a href="https://etherscan.io/address/0xc555d55279023e732ccd32d812114caf5838fd46" target="_blank">0xc555d5…38fd46</a> </td>
+          <td>ethereum</td>
+          <td class="score-low">26.85</td>
+          <td>50.0%</td>
+          <td>1/2</td>
+          <td>1</td>
+          <td>1.66%</td>
+        </tr>
+        
+        <tr>
+          <td><a href="https://etherscan.io/address/0x2cc846fff0b08fb3bffad71f53a60b4b6e6d6482" target="_blank">0x2cc846…6d6482</a> </td>
+          <td>ethereum</td>
+          <td class="score-low">26.32</td>
+          <td>50.0%</td>
+          <td>1/2</td>
+          <td>1</td>
+          <td>-3.95%</td>
+        </tr>
+        
+        <tr>
+          <td><a href="https://etherscan.io/address/0xfff8d5fff6ee3226fa2f5d7d5d8c3ff785be9c74" target="_blank">0xfff8d5…be9c74</a> </td>
+          <td>ethereum</td>
+          <td class="score-low">26.32</td>
+          <td>50.0%</td>
+          <td>1/2</td>
+          <td>1</td>
+          <td>-1.15%</td>
+        </tr>
+        
+        <tr>
+          <td><a href="https://etherscan.io/address/0x1ce1f63b584b87d0f3706bfbb2be881270859f0b" target="_blank">0x1ce1f6…859f0b</a> </td>
+          <td>ethereum</td>
+          <td class="score-low">26.32</td>
+          <td>50.0%</td>
+          <td>1/2</td>
+          <td>1</td>
+          <td>-0.23%</td>
+        </tr>
+        
+        <tr>
+          <td><a href="https://etherscan.io/address/0x704ad8d95c12d7fea531738faa94402725acb035" target="_blank">0x704ad8…acb035</a> </td>
+          <td>ethereum</td>
+          <td class="score-low">26.32</td>
+          <td>50.0%</td>
+          <td>1/2</td>
+          <td>1</td>
+          <td>-2.51%</td>
+        </tr>
+        
+        <tr>
+          <td><a href="https://etherscan.io/address/0x5ced44f03ff443bbe14d8ea23bc24425fb89e3ed" target="_blank">0x5ced44…89e3ed</a> </td>
+          <td>ethereum</td>
+          <td class="score-low">20.62</td>
+          <td>33.33%</td>
+          <td>1/3</td>
+          <td>1</td>
+          <td>-3.11%</td>
+        </tr>
+        
+        <tr>
+          <td><a href="https://etherscan.io/address/0xca7c2771d248dcbe09eabe0ce57a62e18da178c0" target="_blank">0xca7c27…a178c0</a> </td>
+          <td>ethereum</td>
+          <td class="score-low">5.62</td>
+          <td>0.0%</td>
+          <td>0/3</td>
+          <td>1</td>
+          <td>-9.09%</td>
+        </tr>
+        
+        <tr>
+          <td><a href="https://etherscan.io/address/0x6c2b607bf0a8ede629d58ba5e05d0448ff7f890a" target="_blank">0x6c2b60…7f890a</a> </td>
+          <td>ethereum</td>
+          <td class="score-low">5.62</td>
+          <td>0.0%</td>
+          <td>0/3</td>
+          <td>1</td>
+          <td>-32.25%</td>
+        </tr>
+        
+      </tbody>
+    </table>
+    
+  </div>
+
+  <div class="grid" style="grid-template-columns: 1fr 1fr;">
+    <div class="section">
+      <h2>🐋 نهنگ‌های فعال</h2>
+      
+    <table class="data-table">
+      <thead><tr>
+        <th>Address</th><th>Chain</th><th>Score</th><th>WinRate</th>
+        <th>Wins/Trades</th><th>Promoted</th><th>Status</th>
+      </tr></thead>
+      <tbody>
+        <tr>
+          <td><a href="https://etherscan.io/address/0x750874e6fb8dca30ce41d445e4baf8c76971f912" target="_blank">0x750874…71f912</a></td>
+          <td>ethereum</td>
+          <td>54.19</td>
+          <td>100.0%</td>
+          <td>3/1</td>
+          <td>2026-09-04</td>
+          <td>active</td>
+        </tr>
+        </tbody>
+    </table>
+    
+    </div>
+    <div class="section">
+      <h2>🥚 کاندیداهای نهنگ</h2>
+      
+    <table class="data-table">
+      <thead><tr>
+        <th>Address</th><th>Chain</th><th>Score</th><th>WinRate</th>
+        <th>Wins</th><th>Avg Profit</th><th>To Whale</th>
+      </tr></thead>
+      <tbody>
+        <tr>
+          <td><a href="https://etherscan.io/address/0xc56c9d4aee66e16aa4a31a710a6d2fc720a626b6" target="_blank">0xc56c9d…a626b6</a></td>
+          <td>ethereum</td>
+          <td>68.90</td>
+          <td>100.0%</td>
+          <td>3</td>
+          <td>38.98%</td>
+          <td>+0.0</td>
+        </tr>
+        
+        <tr>
+          <td><a href="https://etherscan.io/address/0x7dfc9dd51638573a812b39d33eded20df468e7bc" target="_blank">0x7dfc9d…68e7bc</a></td>
+          <td>ethereum</td>
+          <td>61.70</td>
+          <td>100.0%</td>
+          <td>4</td>
+          <td>28.8%</td>
+          <td>+0.0</td>
+        </tr>
+        
+        <tr>
+          <td><a href="https://etherscan.io/address/0x69c66beafb06674db41b22cfc50c34a93b8d82a2" target="_blank">0x69c66b…8d82a2</a></td>
+          <td>ethereum</td>
+          <td>58.04</td>
+          <td>100.0%</td>
+          <td>4</td>
+          <td>17.54%</td>
+          <td>+0.0</td>
+        </tr>
+        
+        <tr>
+          <td><a href="https://etherscan.io/address/0x69c7bd26512f52bf6f76fab834140d13dda673ca" target="_blank">0x69c7bd…a673ca</a></td>
+          <td>ethereum</td>
+          <td>53.09</td>
+          <td>80.0%</td>
+          <td>4</td>
+          <td>23.66%</td>
+          <td>+0.0</td>
+        </tr>
+        
+        <tr>
+          <td><a href="https://etherscan.io/address/0xc2eab7d33d3cb97692ecb231a5d0e4a649cb539d" target="_blank">0xc2eab7…cb539d</a></td>
+          <td>ethereum</td>
+          <td>37.84</td>
+          <td>66.67%</td>
+          <td>2</td>
+          <td>6.9%</td>
+          <td>+7.2</td>
+        </tr>
+        
+        <tr>
+          <td><a href="https://etherscan.io/address/0x7b73644935b8e68019ac6356c40661e1bc315860" target="_blank">0x7b7364…315860</a></td>
+          <td>ethereum</td>
+          <td>31.75</td>
+          <td>50.0%</td>
+          <td>1</td>
+          <td>16.18%</td>
+          <td>+13.2</td>
+        </tr>
+        
+        <tr>
+          <td><a href="https://etherscan.io/address/0xc4704f13d5e08b27b039d53873e813dd2fad99d9" target="_blank">0xc4704f…ad99d9</a></td>
+          <td>ethereum</td>
+          <td>31.74</td>
+          <td>50.0%</td>
+          <td>1</td>
+          <td>16.11%</td>
+          <td>+13.3</td>
+        </tr>
+        
+        <tr>
+          <td><a href="https://etherscan.io/address/0x52c77b0cb827afbad022e6d6caf2c44452edbc39" target="_blank">0x52c77b…edbc39</a></td>
+          <td>ethereum</td>
+          <td>31.34</td>
+          <td>50.0%</td>
+          <td>1</td>
+          <td>15.73%</td>
+          <td>+13.7</td>
+        </tr>
+        </tbody>
+    </table>
+    
+    </div>
+  </div>
+
+  <div class="section">
+    <h2>📊 فروش‌های اخیر</h2>
+    
+    <table class="data-table">
+      <thead><tr>
+        <th>Token</th><th>Wallet</th><th>Profit</th>
+        <th>Sold%</th><th>Hold</th><th>Date</th>
+      </tr></thead>
+      <tbody>
+        <tr>
+          <td><span class="badge win">W</span> NPC</td>
+          <td><a href="https://etherscan.io/address/0x69c7bd26512f52bf6f76fab834140d13dda673ca" target="_blank">0x69c7bd…a673ca</a></td>
+          <td class="profit-pos">+46.1%</td>
+          <td>58.5%</td>
+          <td>2.5h</td>
+          <td>2026-09-05T08:21</td>
+        </tr>
+        
+        <tr>
+          <td><span class="badge loss">L</span> Mog</td>
+          <td><a href="https://etherscan.io/address/0xc2eab7d33d3cb97692ecb231a5d0e4a649cb539d" target="_blank">0xc2eab7…cb539d</a></td>
+          <td class="profit-pos">+5.5%</td>
+          <td>100.0%</td>
+          <td>7.4h</td>
+          <td>2026-09-05T08:21</td>
+        </tr>
+        
+        <tr>
+          <td><span class="badge win">W</span> GROK</td>
+          <td><a href="https://etherscan.io/address/0x69c66beafb06674db41b22cfc50c34a93b8d82a2" target="_blank">0x69c66b…8d82a2</a></td>
+          <td class="profit-pos">+20.6%</td>
+          <td>29.62%</td>
+          <td>85.2h</td>
+          <td>2026-09-05T08:21</td>
+        </tr>
+        
+        <tr>
+          <td><span class="badge win">W</span> ASTEROID</td>
+          <td><a href="https://etherscan.io/address/0x7dfc9dd51638573a812b39d33eded20df468e7bc" target="_blank">0x7dfc9d…68e7bc</a></td>
+          <td class="profit-pos">+40.7%</td>
+          <td>100.0%</td>
+          <td>12.6h</td>
+          <td>2026-09-05T08:21</td>
+        </tr>
+        
+        <tr>
+          <td><span class="badge win">W</span> ETHCAT</td>
+          <td><a href="https://etherscan.io/address/0xc56c9d4aee66e16aa4a31a710a6d2fc720a626b6" target="_blank">0xc56c9d…a626b6</a></td>
+          <td class="profit-pos">+45.7%</td>
+          <td>100.0%</td>
+          <td>5.4h</td>
+          <td>2026-09-05T08:21</td>
+        </tr>
+        
+        <tr>
+          <td><span class="badge win">W</span> ETHCAT</td>
+          <td><a href="https://etherscan.io/address/0xc56c9d4aee66e16aa4a31a710a6d2fc720a626b6" target="_blank">0xc56c9d…a626b6</a></td>
+          <td class="profit-pos">+60.0%</td>
+          <td>93.6%</td>
+          <td>5.4h</td>
+          <td>2026-09-05T07:04</td>
+        </tr>
+        
+        <tr>
+          <td><span class="badge loss">L</span> ELON</td>
+          <td><a href="https://etherscan.io/address/0x7b73644935b8e68019ac6356c40661e1bc315860" target="_blank">0x7b7364…315860</a></td>
+          <td class="profit-pos">+14.1%</td>
+          <td>78.58%</td>
+          <td>19.3h</td>
+          <td>2026-09-05T07:04</td>
+        </tr>
+        
+        <tr>
+          <td><span class="badge win">W</span> GROK</td>
+          <td><a href="https://etherscan.io/address/0x69c66beafb06674db41b22cfc50c34a93b8d82a2" target="_blank">0x69c66b…8d82a2</a></td>
+          <td class="profit-pos">+19.9%</td>
+          <td>29.62%</td>
+          <td>85.2h</td>
+          <td>2026-09-05T07:04</td>
+        </tr>
+        
+        <tr>
+          <td><span class="badge win">W</span> ASTEROID</td>
+          <td><a href="https://etherscan.io/address/0x7dfc9dd51638573a812b39d33eded20df468e7bc" target="_blank">0x7dfc9d…68e7bc</a></td>
+          <td class="profit-pos">+40.0%</td>
+          <td>100.0%</td>
+          <td>12.5h</td>
+          <td>2026-09-05T07:04</td>
+        </tr>
+        
+        <tr>
+          <td><span class="badge loss">L</span> MANYU</td>
+          <td><a href="https://etherscan.io/address/0xc4704f13d5e08b27b039d53873e813dd2fad99d9" target="_blank">0xc4704f…ad99d9</a></td>
+          <td class="profit-pos">+0.4%</td>
+          <td>53.5%</td>
+          <td>2.7h</td>
+          <td>2026-09-05T07:04</td>
+        </tr>
+        
+        <tr>
+          <td><span class="badge loss">L</span> LMEOW</td>
+          <td><a href="https://etherscan.io/address/0x6c2b607bf0a8ede629d58ba5e05d0448ff7f890a" target="_blank">0x6c2b60…7f890a</a></td>
+          <td class="profit-neg">-41.9%</td>
+          <td>77.0%</td>
+          <td>253.8h</td>
+          <td>2026-09-05T07:04</td>
+        </tr>
+        
+        <tr>
+          <td><span class="badge loss">L</span> FLOKI</td>
+          <td><a href="https://etherscan.io/address/0xca7c2771d248dcbe09eabe0ce57a62e18da178c0" target="_blank">0xca7c27…a178c0</a></td>
+          <td class="profit-neg">-8.8%</td>
+          <td>100.0%</td>
+          <td>337.1h</td>
+          <td>2026-09-05T07:04</td>
+        </tr>
+        
+        <tr>
+          <td><span class="badge loss">L</span> KIBSHI</td>
+          <td><a href="https://etherscan.io/address/0xf22fdd2be7c6da9788e4941a6ffc78ca99d7b15c" target="_blank">0xf22fdd…d7b15c</a></td>
+          <td class="profit-neg">-25.0%</td>
+          <td>53.33%</td>
+          <td>62.2h</td>
+          <td>2026-09-05T05:31</td>
+        </tr>
+        
+        <tr>
+          <td><span class="badge win">W</span> NPC</td>
+          <td><a href="https://etherscan.io/address/0x69c7bd26512f52bf6f76fab834140d13dda673ca" target="_blank">0x69c7bd…a673ca</a></td>
+          <td class="profit-pos">+58.3%</td>
+          <td>79.13%</td>
+          <td>251.5h</td>
+          <td>2026-09-05T05:31</td>
+        </tr>
+        
+        <tr>
+          <td><span class="badge loss">L</span> LMEOW</td>
+          <td><a href="https://etherscan.io/address/0x6c2b607bf0a8ede629d58ba5e05d0448ff7f890a" target="_blank">0x6c2b60…7f890a</a></td>
+          <td class="profit-neg">-43.4%</td>
+          <td>76.22%</td>
+          <td>252.3h</td>
+          <td>2026-09-05T05:31</td>
+        </tr>
+        
+        <tr>
+          <td><span class="badge loss">L</span> APU</td>
+          <td><a href="https://etherscan.io/address/0x5ced44f03ff443bbe14d8ea23bc24425fb89e3ed" target="_blank">0x5ced44…89e3ed</a></td>
+          <td class="profit-neg">-37.0%</td>
+          <td>100.0%</td>
+          <td>287.1h</td>
+          <td>2026-09-05T05:31</td>
+        </tr>
+        
+        <tr>
+          <td><span class="badge loss">L</span> LAIKA</td>
+          <td><a href="https://etherscan.io/address/0xda565591731ccd70ed360f4123cf3ca507eb31d7" target="_blank">0xda5655…eb31d7</a></td>
+          <td class="profit-neg">-47.0%</td>
+          <td>79.44%</td>
+          <td>304.2h</td>
+          <td>2026-09-05T05:30</td>
+        </tr>
+        
+        <tr>
+          <td><span class="badge loss">L</span> Kendu</td>
+          <td><a href="https://etherscan.io/address/0xd9f2a7471d1998c69de5cae6df5d3f070f01df9f" target="_blank">0xd9f2a7…01df9f</a></td>
+          <td class="profit-neg">-14.0%</td>
+          <td>85.9%</td>
+          <td>332.9h</td>
+          <td>2026-09-05T05:30</td>
+        </tr>
+        
+        <tr>
+          <td><span class="badge loss">L</span> FLOKI</td>
+          <td><a href="https://etherscan.io/address/0xbc530bfa3fca1a731149248afc7f750c18360de1" target="_blank">0xbc530b…360de1</a></td>
+          <td class="profit-neg">-10.8%</td>
+          <td>94.56%</td>
+          <td>335.5h</td>
+          <td>2026-09-05T05:30</td>
+        </tr>
+        
+        <tr>
+          <td><span class="badge loss">L</span> FLOKI</td>
+          <td><a href="https://etherscan.io/address/0xca7c2771d248dcbe09eabe0ce57a62e18da178c0" target="_blank">0xca7c27…a178c0</a></td>
+          <td class="profit-neg">-10.8%</td>
+          <td>37.28%</td>
+          <td>335.5h</td>
+          <td>2026-09-05T05:30</td>
+        </tr>
+        </tbody>
+    </table>
+    
+  </div>
+
+  <div class="section">
+    
+    <div class="chart">
+      <div class="chart-title">Sells recorded per nightly run (last 24 runs)</div>
+      <div class="bar-chart">
+        <div class="bar-wrap" title="20260822_104533: 0 sells">
+          <div class="bar" style="height: 0%"></div>
+          <div class="bar-label">0822-_1</div>
+        </div>
+        
+        <div class="bar-wrap" title="20260822_105202: 0 sells">
+          <div class="bar" style="height: 0%"></div>
+          <div class="bar-label">0822-_1</div>
+        </div>
+        
+        <div class="bar-wrap" title="20260822_224644: 0 sells">
+          <div class="bar" style="height: 0%"></div>
+          <div class="bar-label">0822-_2</div>
+        </div>
+        
+        <div class="bar-wrap" title="20260823_032359: 0 sells">
+          <div class="bar" style="height: 0%"></div>
+          <div class="bar-label">0823-_0</div>
+        </div>
+        
+        <div class="bar-wrap" title="20260823_033759: 0 sells">
+          <div class="bar" style="height: 0%"></div>
+          <div class="bar-label">0823-_0</div>
+        </div>
+        
+        <div class="bar-wrap" title="20260823_034655: 27 sells">
+          <div class="bar" style="height: 100%"></div>
+          <div class="bar-label">0823-_0</div>
+        </div>
+        
+        <div class="bar-wrap" title="20260823_042730: 0 sells">
+          <div class="bar" style="height: 0%"></div>
+          <div class="bar-label">0823-_0</div>
+        </div>
+        
+        <div class="bar-wrap" title="20260823_224548: 3 sells">
+          <div class="bar" style="height: 11%"></div>
+          <div class="bar-label">0823-_2</div>
+        </div>
+        
+        <div class="bar-wrap" title="20260824_225115: 2 sells">
+          <div class="bar" style="height: 7%"></div>
+          <div class="bar-label">0824-_2</div>
+        </div>
+        
+        <div class="bar-wrap" title="20260825_225255: 3 sells">
+          <div class="bar" style="height: 11%"></div>
+          <div class="bar-label">0825-_2</div>
+        </div>
+        
+        <div class="bar-wrap" title="20260827_032526: 1 sells">
+          <div class="bar" style="height: 4%"></div>
+          <div class="bar-label">0827-_0</div>
+        </div>
+        
+        <div class="bar-wrap" title="20260828_061234: 1 sells">
+          <div class="bar" style="height: 4%"></div>
+          <div class="bar-label">0828-_0</div>
+        </div>
+        
+        <div class="bar-wrap" title="20260829_034627: 0 sells">
+          <div class="bar" style="height: 0%"></div>
+          <div class="bar-label">0829-_0</div>
+        </div>
+        
+        <div class="bar-wrap" title="20260830_002949: 1 sells">
+          <div class="bar" style="height: 4%"></div>
+          <div class="bar-label">0830-_0</div>
+        </div>
+        
+        <div class="bar-wrap" title="20260831_004235: 1 sells">
+          <div class="bar" style="height: 4%"></div>
+          <div class="bar-label">0831-_0</div>
+        </div>
+        
+        <div class="bar-wrap" title="20260901_012032: 0 sells">
+          <div class="bar" style="height: 0%"></div>
+          <div class="bar-label">0901-_0</div>
+        </div>
+        
+        <div class="bar-wrap" title="20260902_002229: 0 sells">
+          <div class="bar" style="height: 0%"></div>
+          <div class="bar-label">0902-_0</div>
+        </div>
+        
+        <div class="bar-wrap" title="20260903_002623: 2 sells">
+          <div class="bar" style="height: 7%"></div>
+          <div class="bar-label">0903-_0</div>
+        </div>
+        
+        <div class="bar-wrap" title="20260904_182037: 0 sells">
+          <div class="bar" style="height: 0%"></div>
+          <div class="bar-label">0904-_1</div>
+        </div>
+        
+        <div class="bar-wrap" title="20260904_185451: 0 sells">
+          <div class="bar" style="height: 0%"></div>
+          <div class="bar-label">0904-_1</div>
+        </div>
+        
+        <div class="bar-wrap" title="20260905_043914: 0 sells">
+          <div class="bar" style="height: 0%"></div>
+          <div class="bar-label">0905-_0</div>
+        </div>
+        
+        <div class="bar-wrap" title="20260905_052215: 26 sells">
+          <div class="bar" style="height: 96%"></div>
+          <div class="bar-label">0905-_0</div>
+        </div>
+        
+        <div class="bar-wrap" title="20260905_065853: 2 sells">
+          <div class="bar" style="height: 7%"></div>
+          <div class="bar-label">0905-_0</div>
+        </div>
+        
+        <div class="bar-wrap" title="20260905_081019: 0 sells">
+          <div class="bar" style="height: 0%"></div>
+          <div class="bar-label">0905-_0</div>
+        </div>
+        </div>
+    </div>
+    
+  </div>
+
+  <footer>
+    Generated by Smart Whale Tracker v2.8.0 · 2026-09-05 08:21 UTC
+  </footer>
+</div>
+</body>
+</html>

@@ -1,0 +1,13 @@
+alert_id,alert_type,wallet_address,token,contract,chain,amount,price,tx_hash,created_at,notes
+alert_1788546495_0x750874,promote,0x750874e6fb8dca30ce41d445e4baf8c76971f912,,,ethereum,0,0,promote_0x750874e6,2026-09-04T18:28:15.994365,promoted to whale
+alert_1788546498_0xc4704f,candidate,0xc4704f13d5e08b27b039d53873e813dd2fad99d9,,,ethereum,0,0,candidate_0xc4704f13d5,2026-09-04T18:28:18.355688,whale candidate (≥1 verified winning sell)
+alert_1788546500_0x7b7364,candidate,0x7b73644935b8e68019ac6356c40661e1bc315860,,,ethereum,0,0,candidate_0x7b73644935,2026-09-04T18:28:20.233120,whale candidate (≥1 verified winning sell)
+alert_1788546502_0xc56c9d,candidate,0xc56c9d4aee66e16aa4a31a710a6d2fc720a626b6,,,ethereum,0,0,candidate_0xc56c9d4aee,2026-09-04T18:28:22.167680,whale candidate (≥1 verified winning sell)
+alert_1788546504_0x704ad8,candidate,0x704ad8d95c12d7fea531738faa94402725acb035,,,ethereum,0,0,candidate_0x704ad8d95c,2026-09-04T18:28:24.043460,whale candidate (≥1 verified winning sell)
+alert_1788546505_0x69c66b,candidate,0x69c66beafb06674db41b22cfc50c34a93b8d82a2,,,ethereum,0,0,candidate_0x69c66beafb,2026-09-04T18:28:25.919469,whale candidate (≥1 verified winning sell)
+alert_1788546507_0xc2eab7,candidate,0xc2eab7d33d3cb97692ecb231a5d0e4a649cb539d,,,ethereum,0,0,candidate_0xc2eab7d33d,2026-09-04T18:28:27.789612,whale candidate (≥1 verified winning sell)
+alert_1788546509_0x7dfc9d,candidate,0x7dfc9dd51638573a812b39d33eded20df468e7bc,,,ethereum,0,0,candidate_0x7dfc9dd516,2026-09-04T18:28:29.663868,whale candidate (≥1 verified winning sell)
+alert_1788546511_0x5ced44,candidate,0x5ced44f03ff443bbe14d8ea23bc24425fb89e3ed,,,ethereum,0,0,candidate_0x5ced44f03f,2026-09-04T18:28:31.541086,whale candidate (≥1 verified winning sell)
+alert_1788583637_0x750874,sell,0x750874e6fb8dca30ce41d445e4baf8c76971f912,WETH,0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2,ethereum,0.0264,2450.93,0xd7762a5256a7d76efc01a041b383d1056d8db9347f8d5a97928fd69bf46c8ce8,2026-09-05T04:47:17.682270,profit=None
+alert_1788586291_0x69c7bd,candidate,0x69c7bd26512f52bf6f76fab834140d13dda673ca,,,ethereum,0,0,candidate_0x69c7bd2651,2026-09-05T05:31:31.309600,whale candidate (≥1 verified winning sell)
+alert_1788586293_0x52c77b,candidate,0x52c77b0cb827afbad022e6d6caf2c44452edbc39,,,ethereum,0,0,candidate_0x52c77b0cb8,2026-09-05T05:31:33.334687,whale candidate (≥1 verified winning sell)

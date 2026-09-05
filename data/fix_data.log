@@ -1,0 +1,11 @@
+2026-08-22 10:44:30,788 [INFO] Loading 956 trades and 273 wallets...
+2026-08-22 10:44:30,790 [INFO] Sanitize done: 716 trades removed, 468 no contract, 248 dup open
+2026-08-22 10:44:30,790 [INFO] Trades: 956 → 240 (with_contract=240)
+2026-08-22 10:44:30,790 [INFO] Wallets: 273
+2026-08-22 10:44:30,790 [INFO] ✅ Fix historical data finished in 0.0s
+2026-09-05 04:37:06,076 [INFO] Loading 273 trades and 297 wallets...
+2026-09-05 04:37:06,079 [INFO] Sanitize done: 9 trades removed, 0 no contract, 9 dup open
+2026-09-05 04:37:06,079 [INFO] Trades: 273 → 264 (with_contract=264)
+2026-09-05 04:37:06,079 [INFO] Wallets: 297
+2026-09-05 04:37:06,082 [INFO] No base token sells found to remove.
+2026-09-05 04:37:06,082 [INFO] ✅ Fix historical data finished in 0.0s
