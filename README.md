@@ -1,6 +1,6 @@
 # Smart Whale Tracker
 
-[![Version](https://img.shields.io/badge/version-2.6.0-blue)](./VERSION)
+[![Version](https://img.shields.io/badge/version-2.7.0-blue)](./VERSION)
 [![Python](https://img.shields.io/badge/python-3.11-green)](https://python.org)
 [![License](https://img.shields.io/badge/license-MIT-brightgreen)](./LICENSE)
 
@@ -112,7 +112,7 @@ dashboard.py           # HTML dashboard generator
 fix_data.py            # پاکسازی داده (دستی)
 config.py / db.py / apis.py / scoring.py / telegram_utils.py
 version.py             # ورژن‌بندی متمرکز (VERSION file را می‌خواند)
-VERSION                # ورژن فعلی (مثلاً 2.6.0)
+VERSION                # ورژن فعلی (مثلاً 2.7.0)
 CHANGELOG.md           # تاریخچه تغییرات
 .gitignore             # data/* را ignore می‌کند (به‌جز .gitkeep)
 data/.gitkeep          # placeholder برای دایرکتوری data/

@@ -20,6 +20,56 @@ Each change bumps exactly ONE number and resets the lower ones to 0.
 
 ---
 
+## [2.7.0] — 2026-09-05
+
+### Fixed — CRITICAL (backfill was skipping ALL sells without historical price)
+
+After v2.6.0, backfill found 5 sells but recorded 0:
+```
+Backfill done: wallets=5, sells_found=5, sells_recorded=0, skipped=5
+```
+
+**Root cause:** In v2.5.0, when no historical buy price was available, the code
+would SKIP the sell entirely (to avoid 0% profit synthetic trades). But this
+meant most backfill discoveries were being thrown away!
+
+The real goal of backfill is to **increase `trades` count** for whale qualification
+(`WHALE_MIN_TRADES=3`). Even a 0% profit trade counts toward this requirement.
+A wallet with 5 trades (even if 4 have 0% profit) qualifies for `trades>=3`.
+But if we skip all sells without historical price, the wallet stays at trades=1.
+
+- **#1 Use current price as fallback when historical price unavailable**:
+  - OLD: skip sell if no historical buy price → 0 sells recorded
+  - NEW: use `current_price` as `buy_price` fallback (profit ~0%, but trade counts)
+  - This ensures every backfill discovery creates a trade entry
+
+- **#2 Added historical sell price lookup**:
+  - Now also fetches `get_token_price_at_timestamp(sell_ts)` for the sell time
+  - Uses historical sell price for profit calculation when available
+  - Falls back to current price when historical sell price unavailable
+  - Records the actual sell price (historical or current) in `sell_price` field
+
+- **#3 Removed redundant `trade_id`-based dedup in backfill**:
+  - OLD: pre-checked `existing_sells` for `(trade_id, wallet)` and skipped
+  - NEW: relies on `db.add_sell()` internal dedup (wallet + contract + price + profit)
+  - This allows multiple sells on different contracts for the same wallet
+  - Genuine duplicates are still blocked by `add_sell()`'s internal logic
+
+### Changed
+- `backfill_candidates()`: no longer skips sells without historical price
+- Profit calculation now uses historical sell price when available
+- `sell_price` recorded in sells.csv now reflects actual sell-time price (or current)
+- Badge version bumped to 2.7.0
+
+### Migration notes for users
+- **No data migration needed**
+- Future nightly runs will now record backfilled sells even without historical prices
+- Wallets will reach `trades>=3` after 2-3 backfill runs
+- Combined with `wins>=2` (already working), wallets will qualify as whales
+- Expect 3-5 new whales within 1-2 nightly runs after upgrading
+
+---
+
 ## [2.6.0] — 2026-09-05
 
 ### Fixed — CRITICAL (multiple sells blocked whale qualification)

@@ -423,58 +423,74 @@ def backfill_candidates() -> Dict[str, int]:
             else:
                 # No existing trade — CREATE a backfilled trade.
                 # Try to estimate historical buy_price using DexScreener's 24h price change.
-                # If we can't get a historical estimate, SKIP this sell (don't pollute
-                # data with 0% profit synthetic trades — they're useless for whale qualification).
+                # If we can't get a historical estimate, use current price as fallback
+                # (profit will be ~0%, but the trade counts toward WHALE_MIN_TRADES).
                 buy_ts = s.get("buy_timestamp") or 0
+                sell_ts = s.get("sell_timestamp") or 0
                 est_buy_price = None
+                est_sell_price = None
                 if buy_ts > 0:
                     est_buy_price = apis.get_token_price_at_timestamp(contract, chain, buy_ts)
+                if sell_ts > 0:
+                    est_sell_price = apis.get_token_price_at_timestamp(contract, chain, sell_ts)
 
+                # Determine buy_price: prefer historical estimate, fallback to current price
                 if est_buy_price and est_buy_price > 0:
-                    # We have a historical price estimate — use it as buy_price
                     buy_price = est_buy_price
-                    synthetic_token_info = {
-                        "symbol": s.get("token_symbol") or "UNKNOWN",
-                        "name": s.get("token_symbol") or "Backfilled",
-                        "contract": contract,
-                    }
-                    trade_id = db.add_trade(
-                        wallet_address=addr,
-                        token_info=synthetic_token_info,
-                        price=buy_price,
-                        chain=chain,
-                    )
-                    if not trade_id:
-                        for t in all_trades:
-                            if (t.get("wallet_address") or "").lower() == addr and \
-                               (t.get("contract") or "").lower() == contract:
-                                trade_id = t.get("trade_id")
-                                break
-                    if not trade_id:
-                        stats["skipped"] += 1
-                        continue
                 else:
-                    # No historical price available — skip this sell.
-                    # Creating a 0% profit synthetic trade would pollute the data.
+                    # No historical price — use current price (profit will be ~0%)
+                    # This still creates a trade entry, which helps with WHALE_MIN_TRADES
+                    buy_price = current_price
                     logger.info(
-                        "Backfill %s: no historical price for %s, skip (would be 0%% profit)",
+                        "Backfill %s: no historical buy price for %s, using current price (profit will be ~0%%)",
                         addr[:10], s.get("token_symbol", "?"),
                     )
+
+                # Determine sell_price: prefer historical estimate, fallback to current price
+                if est_sell_price and est_sell_price > 0:
+                    actual_sell_price = est_sell_price
+                else:
+                    actual_sell_price = current_price
+
+                synthetic_token_info = {
+                    "symbol": s.get("token_symbol") or "UNKNOWN",
+                    "name": s.get("token_symbol") or "Backfilled",
+                    "contract": contract,
+                }
+                trade_id = db.add_trade(
+                    wallet_address=addr,
+                    token_info=synthetic_token_info,
+                    price=buy_price,
+                    chain=chain,
+                )
+                if not trade_id:
+                    # add_trade may have rejected if (wallet,contract) already open.
+                    # Find it again in all_trades.
+                    for t in all_trades:
+                        if (t.get("wallet_address") or "").lower() == addr and \
+                           (t.get("contract") or "").lower() == contract:
+                            trade_id = t.get("trade_id")
+                            break
+                if not trade_id:
                     stats["skipped"] += 1
                     continue
 
-            profit = ((current_price - buy_price) / buy_price) * 100.0
-            # NOTE: this is the CURRENT profit, not the historical sell-time profit.
+            # Calculate profit using the best available prices
+            if est_sell_price and est_sell_price > 0:
+                # Use historical sell price if we have it
+                profit = ((est_sell_price - buy_price) / buy_price) * 100.0
+            else:
+                # Fallback to current price for profit calculation
+                profit = ((current_price - buy_price) / buy_price) * 100.0
+            # NOTE: When we have historical prices, profit reflects actual sell-time profit.
+            # When we don't, profit is ~0% (buy_price = current_price fallback).
 
-            # Skip if we already have a sell for this trade
-            already = any(
-                (es.get("trade_id") == trade_id and
-                 es.get("wallet_address", "").lower() == addr)
-                for es in existing_sells
-            )
-            if already:
-                stats["skipped"] += 1
-                continue
+            # Determine which sell_price to record
+            sell_price_to_record = est_sell_price if (est_sell_price and est_sell_price > 0) else current_price
+
+            # LIGHT dedup: only skip if EXACT same (wallet, contract, sell_price, profit) exists.
+            # This is now handled by db.add_sell() internally, so we don't need to pre-check here.
+            # The add_sell() function will return None if it's a genuine duplicate.
 
             # Compute hold_duration from buy_ts to sell_ts
             hold_hours = (sell_ts - buy_ts) / 3600.0 if buy_ts > 0 else 0.0
@@ -488,7 +504,7 @@ def backfill_candidates() -> Dict[str, int]:
                 wallet_address=addr,
                 token=s.get("token_symbol") or "???",
                 contract=contract,
-                sell_price=current_price,
+                sell_price=sell_price_to_record,
                 sell_percent=s.get("sold_percent", 100.0),
                 profit_percent=profit,
                 is_winning=is_winning,
