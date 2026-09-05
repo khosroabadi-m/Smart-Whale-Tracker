@@ -266,7 +266,11 @@ def add_sell(
     if profit_percent < -95:
         profit_percent = -95.0
 
-    sell_id = f"sell_{int(datetime.now(timezone.utc).replace(tzinfo=None).timestamp())}_{wallet_address[:10]}"
+    # Generate unique sell_id with random suffix to avoid collisions
+    # (multiple sells can be recorded in the same second for different contracts)
+    import random
+    suffix = random.randint(100, 999)
+    sell_id = f"sell_{int(datetime.now(timezone.utc).replace(tzinfo=None).timestamp())}_{wallet_address[:10]}_{suffix}"
     sell_data = {
         "sell_id": sell_id,
         "trade_id": trade_id,
@@ -284,11 +288,19 @@ def add_sell(
 
     headers = sell_headers()
     data = read_csv(cfg.SELLS_FILE, headers)
-    # prevent exact duplicate sells for same trade
+
+    # LIGHT dedup: only skip if EXACT same (wallet, contract, sell_price, profit) exists.
+    # This prevents re-recording the same sell on nightly re-runs, but ALLOWS multiple
+    # different sells from the same wallet on different contracts (which is what we want
+    # for whale qualification — wallet needs wins>=2 from DIFFERENT tokens).
     for s in data:
-        if s.get("trade_id") == trade_id and s.get("wallet_address", "").lower() == wallet_address:
-            # already has a sell for this trade – skip
+        if (s.get("wallet_address", "").lower() == wallet_address and
+            (s.get("contract") or "").lower() == (contract or "").lower() and
+            s.get("sell_price") == sell_data["sell_price"] and
+            s.get("profit_percent") == sell_data["profit_percent"]):
+            # Same wallet + same contract + same price + same profit = genuine duplicate
             return None
+
     data.append(sell_data)
     write_csv(cfg.SELLS_FILE, headers, data)
 

@@ -91,6 +91,42 @@ class TestDB(unittest.TestCase):
         trades = db.read_csv(cfg.TRADES_FILE, db.trade_headers())
         self.assertEqual(trades[0]["status"], "closed")
 
+    def test_multiple_sells_on_different_contracts_allowed(self):
+        """Wallet should be able to record sells on DIFFERENT contracts.
+        This is essential for whale qualification (wins>=2 from different tokens)."""
+        addr = "0xmulti123456789012345678901234567890123456"
+        # Create 2 trades on different contracts
+        tid1 = db.add_trade(addr, {"symbol": "A", "name": "TokA", "contract": "0xaaa111aaa111aaa111aaa111aaa111aaa111aaa1"}, 0.01, "ethereum")
+        tid2 = db.add_trade(addr, {"symbol": "B", "name": "TokB", "contract": "0xbbb222bbb222bbb222bbb222bbb222bbb222bbb2"}, 0.02, "ethereum")
+        # Record sells on both contracts (with different prices/profits so they don't dedup)
+        sid1 = db.add_sell(tid1, addr, "A", "0xaaa111aaa111aaa111aaa111aaa111aaa111aaa1",
+                          sell_price=0.02, sell_percent=100, profit_percent=100,
+                          is_winning=True, hold_duration=5.0, verified_onchain=True)
+        sid2 = db.add_sell(tid2, addr, "B", "0xbbb222bbb222bbb222bbb222bbb222bbb222bbb2",
+                          sell_price=0.03, sell_percent=100, profit_percent=50,
+                          is_winning=True, hold_duration=10.0, verified_onchain=True)
+        self.assertIsNotNone(sid1, "First sell should be recorded")
+        self.assertIsNotNone(sid2, "Second sell on different contract should be recorded")
+        w = db.get_wallet(addr)
+        self.assertEqual(w["total_sells"], "2", "Wallet should have 2 sells")
+        self.assertEqual(w["winning_sells"], "2", "Wallet should have 2 winning sells")
+
+    def test_exact_duplicate_sell_blocked(self):
+        """Re-recording the EXACT same sell (same wallet+contract+price+profit) should be blocked."""
+        addr = "0xdup1234567890123456789012345678901234567"
+        tid = db.add_trade(addr, {"symbol": "D", "name": "Dup", "contract": "0xdupdupdupdupdupdupdupdupdupdupdupdupdup1"}, 0.01, "ethereum")
+        sid1 = db.add_sell(tid, addr, "D", "0xdupdupdupdupdupdupdupdupdupdupdupdupdup1",
+                          sell_price=0.02, sell_percent=100, profit_percent=100,
+                          is_winning=True, hold_duration=5.0, verified_onchain=True)
+        # Try to record the EXACT same sell again (same price + same profit)
+        sid2 = db.add_sell(tid, addr, "D", "0xdupdupdupdupdupdupdupdupdupdupdupdupdup1",
+                          sell_price=0.02, sell_percent=100, profit_percent=100,
+                          is_winning=True, hold_duration=5.0, verified_onchain=True)
+        self.assertIsNotNone(sid1, "First sell should be recorded")
+        self.assertIsNone(sid2, "Exact duplicate sell should be blocked")
+        w = db.get_wallet(addr)
+        self.assertEqual(w["total_sells"], "1", "Wallet should have only 1 sell (duplicate blocked)")
+
     def test_atomic_write_readable(self):
         db.write_csv(cfg.WALLETS_FILE, db.wallet_headers(), [
             {"address": "0x1", "chain": "ethereum", "first_seen": "x", "last_seen": "x",

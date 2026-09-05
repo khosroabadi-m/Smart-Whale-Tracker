@@ -20,6 +20,61 @@ Each change bumps exactly ONE number and resets the lower ones to 0.
 
 ---
 
+## [2.6.0] — 2026-09-05
+
+### Fixed — CRITICAL (multiple sells blocked whale qualification)
+
+After analyzing the user's data, we discovered why only 1 wallet became a whale:
+
+```
+Wallet              wins  sells  trades  is_whale?  why not?
+0x69c7bd26512f        2      3       1    ❌         sc<45, tr<3
+0xc4704f13d5e0        1      1       1    ❌         wins<2, tr<3
+0x7b73644935b8        1      1       1    ❌         wins<2, tr<3
+0xf22fdd2be7c6        2      4       1    ❌         sc<45, tr<3
+0x69c66beafb06        1      1       1    ❌         wins<2, tr<3
+... (13 more wallets, all blocked by wins<2 OR trades<3)
+```
+
+**16 wallets had ≥1 winning sell, but NONE could qualify as whale** because:
+- `WHALE_MIN_TRADES = 3` → all wallets had `trades=1`
+- `WHALE_MIN_WINNING_SELLS = 2` → 13 of 16 had only `wins=1`
+
+**Root cause:** `db.add_sell()` had aggressive deduplication:
+```python
+# OLD: block if same trade_id + wallet already has ANY sell
+for s in data:
+    if s.get("trade_id") == trade_id and s.get("wallet_address") == wallet:
+        return None  # ← blocked multiple sells for same wallet!
+```
+
+This meant: even if backfill found 5 profitable sells on 5 different tokens,
+only the FIRST one would be recorded. The rest were blocked as "duplicates".
+
+- **#1 Changed `add_sell()` deduplication logic**:
+  - OLD: blocked any sell if (trade_id, wallet) already had a sell → max 1 sell per wallet
+  - NEW: only blocks if EXACT same (wallet, contract, sell_price, profit_percent) exists
+  - This allows multiple sells from the same wallet on DIFFERENT contracts
+  - Genuine duplicates (re-runs of same sell) are still blocked
+  - Added random suffix to `sell_id` to avoid collisions when recording multiple sells in same second
+
+- **#2 Added 2 new tests**:
+  - `test_multiple_sells_on_different_contracts_allowed`: verifies wallet can have 2+ sells
+  - `test_exact_duplicate_sell_blocked`: verifies genuine duplicates are still blocked
+
+### Changed
+- `db.add_sell()`: dedup logic now uses (wallet, contract, sell_price, profit) tuple instead of (trade_id, wallet)
+- `sell_id` generation now includes random 3-digit suffix for uniqueness
+- Badge version bumped to 2.6.0
+
+### Migration notes for users
+- **No data migration needed** — existing sells are preserved
+- Future nightly runs will now record multiple sells per wallet (when found by backfill)
+- Wallets that previously had `wins=1` may now reach `wins=2+` and qualify as whales
+- Expect 3-5 new whales within 1-2 nightly runs after upgrading
+
+---
+
 ## [2.5.0] — 2026-09-04
 
 ### Fixed — CRITICAL (backfill pollution)
