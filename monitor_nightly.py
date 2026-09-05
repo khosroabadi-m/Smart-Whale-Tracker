@@ -362,6 +362,80 @@ def backfill_candidates() -> Dict[str, int]:
         if not addr:
             continue
 
+        # STEP 1: Backfill BUYS — find ALL contracts the wallet bought (even unsold ones).
+        # This creates new trade entries for contracts we didn't track before.
+        # This is what increases `total_trades` count for whale qualification.
+        try:
+            buys = apis.backfill_wallet_buys(
+                wallet=addr,
+                chain=chain,
+                days_back=cfg.BACKFILL_DAYS,
+                max_tokens=cfg.BACKFILL_MAX_TOKENS_PER_WALLET,
+            )
+        except Exception as e:
+            logger.warning("Backfill buys error for %s: %s", addr[:10], e)
+            buys = []
+
+        # Create trades for any contracts we don't already have a trade for
+        all_trades = db.read_csv(cfg.TRADES_FILE, db.trade_headers())
+        new_trades_created = 0
+        for buy in buys:
+            contract = (buy.get("contract") or "").lower()
+            if not contract or not contract.startswith("0x"):
+                continue
+            # Check if we already have a trade for this (wallet, contract)
+            already_tracked = any(
+                (t.get("wallet_address") or "").lower() == addr and
+                (t.get("contract") or "").lower() == contract
+                for t in all_trades
+            )
+            if already_tracked:
+                continue
+
+            # Get buy price (try historical, fallback to current)
+            buy_ts = buy.get("buy_timestamp") or 0
+            est_buy_price = None
+            if buy_ts > 0:
+                est_buy_price = apis.get_token_price_at_timestamp(contract, chain, buy_ts)
+            if not est_buy_price or est_buy_price <= 0:
+                est_buy_price = apis.get_token_price(contract, chain)
+            if not est_buy_price or est_buy_price <= 0:
+                logger.info(
+                    "Backfill %s: no price for %s, skip trade creation",
+                    addr[:10], buy.get("token_symbol", "?"),
+                )
+                continue
+
+            # Create the trade
+            synthetic_token_info = {
+                "symbol": buy.get("token_symbol") or "UNKNOWN",
+                "name": buy.get("token_symbol") or "Backfilled",
+                "contract": contract,
+            }
+            trade_id = db.add_trade(
+                wallet_address=addr,
+                token_info=synthetic_token_info,
+                price=est_buy_price,
+                chain=chain,
+            )
+            if trade_id:
+                new_trades_created += 1
+                logger.info(
+                    "Backfill %s: created trade for %s (buy_price=%.8g)",
+                    addr[:10], buy.get("token_symbol", "?"), est_buy_price,
+                )
+                # Refresh all_trades so next iteration sees it
+                all_trades = db.read_csv(cfg.TRADES_FILE, db.trade_headers())
+            time.sleep(0.2)
+
+        if new_trades_created > 0:
+            logger.info(
+                "Backfill %s: created %d new trades (total_trades will increase)",
+                addr[:10], new_trades_created,
+            )
+
+        # STEP 2: Backfill SELLS — find contracts where wallet both bought AND sold.
+        # This records the actual sell events (with profit calculation).
         try:
             found = apis.backfill_wallet_sells(
                 wallet=addr,

@@ -936,6 +936,123 @@ def backfill_wallet_sells(
     return found
 
 
+def backfill_wallet_buys(
+    wallet: str,
+    chain: str,
+    days_back: int = 30,
+    max_tokens: int = 25,
+) -> List[Dict]:
+    """
+    Look back N days into wallet's token-transfer history.
+    Find ALL contracts the wallet BOUGHT (received tokens), even if they haven't sold yet.
+
+    This is more comprehensive than backfill_wallet_sells() which only returns contracts
+    where the wallet both bought AND sold. Many wallets buy multiple tokens but only sell
+    some of them — those unsold tokens still count as "trades" for whale qualification.
+
+    Returns list of dicts:
+      {contract, token_symbol, buy_timestamp, buy_hash, amount_in, has_sell}
+    """
+    from datetime import datetime, timedelta, timezone
+
+    wallet = (wallet or "").lower().strip()
+    chain = (chain or "ethereum").lower()
+    if not wallet:
+        return []
+
+    # fetch up to 200 transfers — sort="desc" to get NEWEST first
+    txs = get_wallet_all_token_transfers(wallet, chain, sort="desc", offset=200)
+    if not txs and chain in ("ethereum", "eth"):
+        txs = _blockscout_wallet_token_transfers_all(wallet)
+    if not txs:
+        logger.info(
+            "Backfill buys %s: 0 transfers from API (chain=%s)",
+            wallet[:10], chain,
+        )
+        return []
+
+    logger.info(
+        "Backfill buys %s: got %d raw transfers (chain=%s), filtering last %d days",
+        wallet[:10], len(txs), chain, days_back,
+    )
+
+    cutoff_ts = int((datetime.now(timezone.utc).replace(tzinfo=None) -
+                     timedelta(days=days_back)).timestamp())
+
+    # group transfers by contract
+    by_contract: Dict[str, List[Dict]] = {}
+    skipped_old = 0
+    for tx in txs:
+        try:
+            ts = int(tx.get("timeStamp") or 0)
+            if ts < cutoff_ts:
+                skipped_old += 1
+                continue
+            contract = (tx.get("contractAddress") or "").lower()
+            if not contract:
+                continue
+            by_contract.setdefault(contract, []).append(tx)
+        except (ValueError, TypeError):
+            continue
+
+    # for each contract, check if wallet received tokens (bought)
+    found: List[Dict] = []
+    w = wallet.lower()
+    for contract, ctx_txs in by_contract.items():
+        if len(found) >= max_tokens:
+            break
+        # FILTER OUT base tokens
+        if hasattr(cfg, "BASE_TOKENS") and contract in cfg.BASE_TOKENS:
+            continue
+        ctx_txs.sort(key=lambda x: int(x.get("timeStamp") or 0))
+        total_in = 0.0
+        total_out = 0.0
+        first_buy_ts = 0
+        first_buy_hash = ""
+        symbol = ctx_txs[0].get("tokenSymbol") or "???"
+        decimals = int(ctx_txs[0].get("tokenDecimal") or 18)
+
+        for tx in ctx_txs:
+            try:
+                ts = int(tx.get("timeStamp") or 0)
+                amount = float(tx.get("value") or 0) / (10 ** decimals)
+                from_a = (tx.get("from") or "").lower()
+                to_a = (tx.get("to") or "").lower()
+                if to_a == w and from_a != w:
+                    total_in += amount
+                    if first_buy_ts == 0:
+                        first_buy_ts = ts
+                        first_buy_hash = tx.get("hash") or ""
+                elif from_a == w and to_a != w:
+                    total_out += amount
+            except (ValueError, TypeError):
+                continue
+
+        # we have a buy only if total_in > 0
+        if total_in <= 0:
+            continue
+        # skip dust buys
+        if total_in < 0.001:
+            continue
+
+        found.append({
+            "contract": contract,
+            "token_symbol": symbol,
+            "buy_timestamp": first_buy_ts,
+            "buy_hash": first_buy_hash,
+            "amount_in": total_in,
+            "amount_out": total_out,
+            "has_sell": total_out > 0,
+        })
+
+    found.sort(key=lambda x: x["buy_timestamp"], reverse=True)
+    logger.info(
+        "Backfill buys %s: %d contracts analyzed, %d had buys (skipped_old=%d)",
+        wallet[:10], len(by_contract), len(found), skipped_old,
+    )
+    return found
+
+
 def _blockscout_wallet_token_transfers_all(wallet: str) -> List[Dict]:
     """
     Blockscout fallback for Ethereum: fetch ALL recent token transfers

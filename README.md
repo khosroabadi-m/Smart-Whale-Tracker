@@ -1,6 +1,6 @@
 # Smart Whale Tracker
 
-[![Version](https://img.shields.io/badge/version-2.7.1-blue)](./VERSION)
+[![Version](https://img.shields.io/badge/version-2.8.0-blue)](./VERSION)
 [![Python](https://img.shields.io/badge/python-3.11-green)](https://python.org)
 [![License](https://img.shields.io/badge/license-MIT-brightgreen)](./LICENSE)
 
@@ -112,7 +112,7 @@ dashboard.py           # HTML dashboard generator
 fix_data.py            # پاکسازی داده (دستی)
 config.py / db.py / apis.py / scoring.py / telegram_utils.py
 version.py             # ورژن‌بندی متمرکز (VERSION file را می‌خواند)
-VERSION                # ورژن فعلی (مثلاً 2.7.1)
+VERSION                # ورژن فعلی (مثلاً 2.8.0)
 CHANGELOG.md           # تاریخچه تغییرات
 .gitignore             # data/* را ignore می‌کند (به‌جز .gitkeep)
 data/.gitkeep          # placeholder برای دایرکتوری data/
@@ -203,9 +203,23 @@ python monitor_nightly.py
 ## تست‌ها
 
 ```bash
+# تست‌های واحد (۲۷ تست)
 python tests/test_logic.py
-# → ۲۳ تست (۱۵ اصلی + ۸ جدید برای featureهای v2)
+
+# تست‌های یکپارچه (۲۰ تست) — شبیه‌سازی کامل nightly flow با mock API
+python tests/test_integration.py
+
+# هر دو با هم
+python tests/test_logic.py && python tests/test_integration.py
+# → ۴۷ تست، همه باید pass بشن
 ```
+
+تست‌های یکپارچه (`test_integration.py`) شبیه‌سازی کامل nightly flow رو با mock API انجام می‌دن:
+- `backfill_wallet_buys()` با داده‌های mock
+- `backfill_candidates()` با انواع سناریوها
+- `main()` با داده‌های خالی و پر
+- Edge cases: trade موجود، trade جدید، بدون قیمت، API error
+- این تست‌ها قبل از deploy اجرا می‌شن تا از خطاهای runtime جلوگیری کنن
 
 ## محدودیت‌ها و نکات
 

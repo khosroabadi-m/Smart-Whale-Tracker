@@ -20,6 +20,49 @@ Each change bumps exactly ONE number and resets the lower ones to 0.
 
 ---
 
+## [2.8.0] — 2026-09-05
+
+### Fixed — CRITICAL (backfill only found SAME contracts, no new trades created)
+
+After v2.7.1, backfill logged "5 sells recorded" but `trades.csv` count didn't increase.
+All 5 candidates still had `trades=1` — the backfill was only finding contracts we
+ALREADY had trades for, not NEW ones.
+
+**Root cause:** `backfill_wallet_sells()` only returns contracts where the wallet
+**both bought AND sold**. But wallets typically buy many tokens and only sell some.
+Those unsold tokens (held positions) never appear in backfill results, so no new
+trades are created for them → `trades` count never increases.
+
+**The fix:** Added a new function `backfill_wallet_buys()` that finds ALL contracts
+the wallet bought (even if they haven't sold yet). The nightly backfill now runs in
+two steps:
+
+1. **STEP 1 — Backfill BUYS:** Find all contracts the wallet bought in last 30 days.
+   For each contract we don't already track, create a new trade entry. This is what
+   increases `total_trades` count for whale qualification (`WHALE_MIN_TRADES=3`).
+
+2. **STEP 2 — Backfill SELLS:** Find contracts where wallet both bought AND sold.
+   Record the actual sell events with profit calculation (existing behavior).
+
+### Added
+- `apis.backfill_wallet_buys()` — finds all contracts wallet bought (not just sold)
+- Two-step backfill in `monitor_nightly.py`: first create trades from buys, then record sells
+- Logging for new trades created: "Backfill X: created N new trades"
+
+### Changed
+- `backfill_candidates()` now calls `backfill_wallet_buys()` first, then `backfill_wallet_sells()`
+- Wallets will now reach `trades>=3` after a single backfill run (instead of staying at 1)
+- Badge version bumped to 2.8.0
+
+### Migration notes for users
+- **No data migration needed**
+- Future nightly runs will create new trades for contracts the wallet bought but we didn't track
+- Wallets that had `trades=1` will now reach `trades=3+` after one nightly run
+- Combined with `wins>=2` (already working), wallets will finally qualify as whales
+- Expect 3-5 new whales within 1-2 nightly runs after upgrading
+
+---
+
 ## [2.7.1] — 2026-09-05
 
 ### Fixed — CRITICAL (UnboundLocalError crashed nightly)
