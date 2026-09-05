@@ -405,6 +405,16 @@ def backfill_candidates() -> Dict[str, int]:
                 stats["skipped"] += 1
                 continue
 
+            # Initialize historical price estimates (used in both branches below)
+            buy_ts = s.get("buy_timestamp") or 0
+            sell_ts = s.get("sell_timestamp") or 0
+            est_buy_price = None
+            est_sell_price = None
+            if buy_ts > 0:
+                est_buy_price = apis.get_token_price_at_timestamp(contract, chain, buy_ts)
+            if sell_ts > 0:
+                est_sell_price = apis.get_token_price_at_timestamp(contract, chain, sell_ts)
+
             # Look for existing trade for this wallet+contract
             existing_trade = None
             for t in all_trades:
@@ -422,18 +432,6 @@ def backfill_candidates() -> Dict[str, int]:
                     continue
             else:
                 # No existing trade — CREATE a backfilled trade.
-                # Try to estimate historical buy_price using DexScreener's 24h price change.
-                # If we can't get a historical estimate, use current price as fallback
-                # (profit will be ~0%, but the trade counts toward WHALE_MIN_TRADES).
-                buy_ts = s.get("buy_timestamp") or 0
-                sell_ts = s.get("sell_timestamp") or 0
-                est_buy_price = None
-                est_sell_price = None
-                if buy_ts > 0:
-                    est_buy_price = apis.get_token_price_at_timestamp(contract, chain, buy_ts)
-                if sell_ts > 0:
-                    est_sell_price = apis.get_token_price_at_timestamp(contract, chain, sell_ts)
-
                 # Determine buy_price: prefer historical estimate, fallback to current price
                 if est_buy_price and est_buy_price > 0:
                     buy_price = est_buy_price
@@ -445,12 +443,6 @@ def backfill_candidates() -> Dict[str, int]:
                         "Backfill %s: no historical buy price for %s, using current price (profit will be ~0%%)",
                         addr[:10], s.get("token_symbol", "?"),
                     )
-
-                # Determine sell_price: prefer historical estimate, fallback to current price
-                if est_sell_price and est_sell_price > 0:
-                    actual_sell_price = est_sell_price
-                else:
-                    actual_sell_price = current_price
 
                 synthetic_token_info = {
                     "symbol": s.get("token_symbol") or "UNKNOWN",

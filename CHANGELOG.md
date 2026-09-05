@@ -20,6 +20,27 @@ Each change bumps exactly ONE number and resets the lower ones to 0.
 
 ---
 
+## [2.7.1] — 2026-09-05
+
+### Fixed — CRITICAL (UnboundLocalError crashed nightly)
+
+**Bug:** `UnboundLocalError: cannot access local variable 'est_sell_price'`
+crashed the nightly job in `backfill_candidates()`.
+
+**Root cause:** In v2.7.0, the variables `est_buy_price` and `est_sell_price`
+were defined INSIDE the `else` branch (when no existing trade exists). But they
+were used AFTER the `if/else` block (in profit calculation). When `existing_trade`
+was truthy (the `if` branch), the variables were never defined.
+
+**Fix:** Moved the historical price lookup BEFORE the `if existing_trade:` check,
+so `est_buy_price` and `est_sell_price` are always defined regardless of which
+branch executes.
+
+### Changed
+- `monitor_nightly.py backfill_candidates()`: moved `buy_ts`/`sell_ts`/`est_buy_price`/`est_sell_price` initialization before the `if existing_trade:` block
+
+---
+
 ## [2.7.0] — 2026-09-05
 
 ### Fixed — CRITICAL (backfill was skipping ALL sells without historical price)
