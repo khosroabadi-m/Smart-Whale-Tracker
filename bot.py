@@ -101,10 +101,11 @@ def main() -> int:
     gainers = apis.fetch_gainers()
     if not gainers:
         logger.info("No quality gainers found")
-        tg.send_message(
+        tg.send_threaded(
             "🤖 *گزارش اجرای ربات*\n\n"
-            "در این اجرا توکن باکیفیتی پیدا نشد\\.\n"
-            f"⏰ {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}"
+            "در این اجرا توکن باکیفیتی پیدا نشده است.\n"
+            f"⏰ {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}",
+            "bot_run",
         )
         return 0
 
@@ -137,18 +138,19 @@ def main() -> int:
         for token, buyers in valid[:report_n]:
             is_wl = any(b.get("address", "").lower() in whitelist for b in buyers)
             msg = tg.format_discovery_signal(token, buyers, is_wl)
-            tg.send_message(msg)
+            # each signal continues the discovery thread
+            tg.send_threaded(msg, "bot_run")
             time.sleep(2.5)
     elif cfg.SEND_DISCOVERY_SIGNALS and not valid:
         logger.info("No new discovery signals to send (all duplicates)")
 
-    tg.send_message(tg.format_bot_run_report({
+    tg.send_threaded(tg.format_bot_run_report({
         "total_tokens": len(gainers),
         "valid_tokens": len(valid),
         "new_wallets": new_trades,
         "whale_count": len(whales),
         "whitelist_count": len(whitelist),
-    }))
+    }), "bot_run")
 
     print(f"✅ Done in {time.time() - start:.1f}s")
     return 0

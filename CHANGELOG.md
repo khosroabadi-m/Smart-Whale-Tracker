@@ -20,6 +20,60 @@ Each change bumps exactly ONE number and resets the lower ones to 0.
 
 ---
 
+## [2.10.0] — 2026-09-07
+
+### Added — Telegram threads & traceability
+
+Every outgoing message is now **sent as a reply to its own source**, so the chat
+reads as threaded conversations instead of scattered posts:
+
+- Whale buy/sell alerts reply to that whale's previous message (its promotion,
+  or its last buy/sell alert) — per-whale threads.
+- The "whale promoted" message replies to that wallet's candidate alert.
+- The nightly report and the bot run report each continue their own thread
+  (`data/tg_state.json` stores the last message id per thread).
+
+Mechanics: `tg.send_message(text, reply_to_message_id=…)` returns the sent
+message id; `tg.send_threaded(text, key)` chains periodic reports. The last
+sent message id per wallet/whale is persisted in new `tg_message_id` columns
+of `wallets.csv` / `whales.csv` (added automatically on the next write).
+
+### Added — richer message design
+
+- All message templates redesigned (✦ headers, section rules, emojis) and now
+  carry a hashtag footer for tracing in Telegram search:
+  event tags (`#WhaleBuy`, `#WhaleSell`, `#WhalePromoted`, `#WhaleCandidate`,
+  `#Discovery`, `#NightlyReport`, `#BotReport`), chain tag (`#ethereum`),
+  cashtag (`$SYMBOL`), and a short wallet tag (`#w5ced44f0`) that lets you
+  follow every message about the same address.
+- Fixed legacy-Markdown escape artifacts (`\\)`, `\\.`) that rendered as
+  literal backslashes.
+
+### Fixed — nightly_log.csv column shift
+
+The file's header was created by an older 15-column schema (missing
+`no_sell_after_buy`), while current code appends 16-field rows — every reader
+shifted values by one column, so `no_sell_after_buy` counts were displayed as
+"errors" (e.g. "247 errors" was actually 247 wallets that simply had not sold
+yet; real errors were 0 in every recorded run).
+
+- `fix_nightly_log.py`: one-time idempotent migration (already applied to the
+  existing file — all 27 runs now balance: checked = no_sell + detected +
+  below_threshold + api_empty + errors).
+- `monitor_nightly._heal_nightly_log_header()`: self-healing guard that
+  realigns the file whenever a future schema change makes the stored header
+  stale.
+
+### Removed — data cleanup
+
+- 9 orphan sells (sell rows referencing trades that no longer exist).
+- 31 stale wallets with zero trades and zero sells (neither whale nor
+  whitelisted).
+- Wallet counters rescored from remaining data (`cleanup_orphans.py`);
+  verified: 0 counter mismatches across all 279 wallets.
+
+---
+
 ## [2.9.0] — 2026-09-05
 
 ### Fixed — CRITICAL (WHALE_MIN_TRADES=3 was impossible to reach)

@@ -14,7 +14,7 @@ import os
 import sys
 import time
 from datetime import datetime, timezone, timedelta
-from typing import Dict, List, Any
+from typing import Dict, List, Any, Optional
 
 import config as cfg
 import db
@@ -47,6 +47,36 @@ def _nightly_log_headers() -> List[str]:
     ]
 
 
+def _heal_nightly_log_header(path: str, headers: List[str]) -> None:
+    """
+    Rewrite nightly_log.csv if its header was written by an older schema
+    (e.g. missing no_sell_after_buy). Rows are realigned positionally:
+    current-width rows map onto the current headers, rows one field short
+    belong to the old schema (same order, without no_sell_after_buy).
+    Malformed rows of any other width are dropped.
+    """
+    with open(path, "r", encoding="utf-8", newline="") as f:
+        rows = list(csv.reader(f))
+    if not rows or rows[0] == headers:
+        return
+    logger.warning(
+        "nightly_log.csv header mismatch (%d cols vs current %d) — rewriting",
+        len(rows[0]), len(headers),
+    )
+    old_headers = [h for h in headers if h != "no_sell_after_buy"]
+    aligned: List[Dict[str, Any]] = []
+    for r in rows[1:]:
+        if not r:
+            continue
+        if len(r) == len(headers):
+            aligned.append(dict(zip(headers, r)))
+        elif len(r) == len(old_headers):
+            d = dict(zip(old_headers, r))
+            d["no_sell_after_buy"] = ""
+            aligned.append(d)
+    db.write_csv(path, headers, aligned)
+
+
 def append_nightly_log(row: Dict[str, Any]) -> None:
     db.ensure_data_dir()
     path = cfg.NIGHTLY_LOG_FILE
@@ -54,6 +84,8 @@ def append_nightly_log(row: Dict[str, Any]) -> None:
     exists = os.path.exists(path) and os.path.getsize(path) > 0
     # also write per-run jsonl under data/logs for detail
     os.makedirs(cfg.LOGS_DIR, exist_ok=True)
+    if exists:
+        _heal_nightly_log_header(path, headers)
     with open(path, "a", encoding="utf-8", newline="") as f:
         w = csv.DictWriter(f, fieldnames=headers, extrasaction="ignore")
         if not exists:
@@ -243,6 +275,28 @@ def process_open_trades(max_trades: int = None) -> Dict[str, int]:
     return counters
 
 
+def _reply_to_source(row: Dict[str, Any]) -> Optional[int]:
+    """Last Telegram message id stored on a wallet/whale row (thread source)."""
+    try:
+        mid = int(row.get("tg_message_id") or 0)
+        return mid if mid > 0 else None
+    except (TypeError, ValueError):
+        return None
+
+
+def _remember_message(row: Dict[str, Any], mid: Optional[int]) -> None:
+    """Store the sent message id back on the wallet (and whale, if promoted)
+    rows so the next event for the same address replies to it."""
+    if not mid:
+        return
+    addr = (row.get("address") or "").lower()
+    if not addr:
+        return
+    db.upsert_wallet({"address": addr, "tg_message_id": str(mid)})
+    if db.is_whale(addr):
+        db.upsert_whale({"address": addr, "tg_message_id": str(mid)})
+
+
 def monitor_whales() -> int:
     """Scan active whales for recent buy/sell and alert."""
     whales = db.get_whales()
@@ -283,7 +337,8 @@ def monitor_whales() -> int:
 
             if ev["type"] == "buy":
                 msg = tg.format_whale_buy(w, ev, price=price)
-                tg.send_message(msg)
+                mid = tg.send_message(msg, reply_to_message_id=_reply_to_source(w))
+                _remember_message(w, mid)
                 db.add_alert(
                     "buy", addr, ev.get("token_symbol", ""), ev.get("contract", ""),
                     chain, ev.get("amount", 0), price, ev.get("hash", ""),
@@ -318,7 +373,8 @@ def monitor_whales() -> int:
                     break
 
                 msg = tg.format_whale_sell(w, ev, price=price, profit_pct=profit)
-                tg.send_message(msg)
+                mid = tg.send_message(msg, reply_to_message_id=_reply_to_source(w))
+                _remember_message(w, mid)
                 db.add_alert(
                     "sell", addr, ev.get("token_symbol", ""), ev.get("contract", ""),
                     chain, ev.get("amount", 0), price, ev.get("hash", ""),
@@ -618,11 +674,17 @@ def send_candidate_alerts() -> int:
             continue
 
         msg = tg.format_whale_candidate(c)
-        if msg and tg.send_message(msg):
+        if not msg:
+            continue
+        mid = tg.send_message(msg, reply_to_message_id=_reply_to_source(c))
+        # record the alert only when Telegram actually accepted the message,
+        # so a failed send is retried on the next run
+        if mid:
             db.add_alert(
                 "candidate", addr, "", "", c.get("chain", "ethereum"),
                 0, 0, synth_hash, notes="whale candidate (≥1 verified winning sell)",
             )
+            _remember_message(c, mid)
             alerted += 1
             time.sleep(1.5)
     return alerted
@@ -665,7 +727,10 @@ def main() -> int:
     # Step 4: promote new whales (may trigger due to backfill discoveries)
     newly = scoring.promote_whales()
     for w in newly:
-        tg.send_message(tg.format_whale_promoted(w))
+        # the promotion message threads onto the wallet's previous message
+        # (e.g. its candidate alert) via tg_message_id
+        mid = tg.send_message(tg.format_whale_promoted(w), reply_to_message_id=_reply_to_source(w))
+        _remember_message(w, mid)
         db.add_alert(
             "promote", w.get("address", ""), "", "", w.get("chain", "ethereum"),
             0, 0, f"promote_{w.get('address', '')[:10]}", notes="promoted to whale",
@@ -688,7 +753,9 @@ def main() -> int:
     is_weekly_day = started.weekday() == getattr(cfg, "WEEKLY_SUMMARY_DAY", 6)
     send_weekly = getattr(cfg, "WEEKLY_SUMMARY_ENABLED", True) and is_weekly_day
 
-    tg.send_message(tg.format_nightly_report({
+    # the nightly report continues its own thread: each report replies to the
+    # previous one so the whole history stays linked in the chat
+    tg.send_threaded(tg.format_nightly_report({
         "total_wallets": len(wallets),
         "new_sells": new_sells,
         "total_whales": len([w for w in whales if (w.get("status") or "active") == "active"]),
@@ -696,7 +763,7 @@ def main() -> int:
     }, top, new_whales=len(newly), whale_events=whale_events,
        backfill_sells=backfill_stats.get("sells_recorded", 0),
        candidate_alerts=candidate_alerts,
-       candidates=candidates if send_weekly else None))
+       candidates=candidates if send_weekly else None), "nightly_report")
 
     finished = datetime.now(timezone.utc).replace(tzinfo=None)
     detail_lines = sell_stats.pop("_detail", [])

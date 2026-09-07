@@ -61,7 +61,7 @@ def wallet_headers() -> List[str]:
         "address", "chain", "first_seen", "last_seen",
         "total_trades", "total_sells", "winning_sells", "losing_sells",
         "win_rate", "avg_profit", "avg_hold_duration", "score", "in_whitelist",
-        "is_whale",
+        "is_whale", "tg_message_id",
     ]
 
 
@@ -92,7 +92,7 @@ def whale_headers() -> List[str]:
     return [
         "address", "chain", "promoted_at", "last_checked",
         "score", "win_rate", "winning_sells", "total_trades",
-        "avg_profit", "status",
+        "avg_profit", "status", "tg_message_id",
     ]
 
 
