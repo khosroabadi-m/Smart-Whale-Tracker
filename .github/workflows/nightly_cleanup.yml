@@ -1,8 +1,12 @@
 name: Nightly Monitor & Cleanup
 
+# Scheduled runs were disabled: this job ran against the CI checkout, whose
+# data/ is empty (data must never be committed to GitHub), so it produced a
+# meaningless empty report and its auto-commit step kept pushing runtime data
+# (wallets.csv, whale_alerts.csv, …) into the repo history.
+# The real nightly job runs on the local machine. Run manually via
+# "Run workflow" only if you ever move data persistence back to CI.
 on:
-  schedule:
-    - cron: "30 22 * * *"
   workflow_dispatch:
 
 # Prevent concurrent runs from clobbering data/
@@ -46,9 +50,4 @@ jobs:
       - name: Generate dashboard
         run: python dashboard.py
 
-      - name: Commit data changes
-        uses: stefanzweifel/git-auto-commit-action@v5
-        with:
-          commit_message: "chore: nightly scores, sells & cleanup"
-          file_pattern: data/
-          skip_dirty_check: false
+      # NOTE: no data commit step — data/ must never be pushed to GitHub.

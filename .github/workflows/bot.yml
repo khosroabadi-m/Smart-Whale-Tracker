@@ -43,9 +43,8 @@ jobs:
           ETHERSCAN_PLAN_TIER: ${{ secrets.ETHERSCAN_PLAN_TIER }}
         run: python bot.py
 
-      - name: Commit data changes
-        uses: stefanzweifel/git-auto-commit-action@v5
-        with:
-          commit_message: "chore: update wallet/trade CSV data"
-          file_pattern: data/
-          skip_dirty_check: false
+      # NOTE: no data commit step — data/ must never be pushed to GitHub.
+      # git-auto-commit-action force-adds even gitignored files, which is how
+      # wallets.csv / trades.csv / whale_alerts.csv ended up in the repo history.
+      # Discovery data is ephemeral here; persistent data lives on the local
+      # machine only.
