@@ -19,6 +19,7 @@ import config as cfg
 import db
 import scoring
 import apis
+import telegram_utils as tg
 
 
 class TestDB(unittest.TestCase):
@@ -507,6 +508,132 @@ class TestApisRetry(unittest.TestCase):
         apis.clear_price_cache()
         # Should not raise
         apis.clear_price_cache()
+
+
+class TestWhaleAggregation(unittest.TestCase):
+    """Whale event aggregation: one summary message per (token, buy|sell) per run."""
+
+    def setUp(self):
+        import monitor_nightly
+        self.mn = monitor_nightly
+        self.tmp = tempfile.mkdtemp()
+        self._old = {a: getattr(cfg, a) for a in
+                     ("DATA_DIR", "WALLETS_FILE", "TRADES_FILE", "SELLS_FILE",
+                      "WHITELIST_FILE", "WHALES_FILE", "ALERTS_FILE")}
+        cfg.DATA_DIR = self.tmp
+        cfg.WALLETS_FILE = os.path.join(self.tmp, "wallets.csv")
+        cfg.TRADES_FILE = os.path.join(self.tmp, "trades.csv")
+        cfg.SELLS_FILE = os.path.join(self.tmp, "sells.csv")
+        cfg.WHITELIST_FILE = os.path.join(self.tmp, "whitelist.csv")
+        cfg.WHALES_FILE = os.path.join(self.tmp, "whales.csv")
+        cfg.ALERTS_FILE = os.path.join(self.tmp, "whale_alerts.csv")
+        self.whale = {
+            "address": "0x1111111111111111111111111111111111111111",
+            "chain": "ethereum", "score": "60", "win_rate": "80",
+            "winning_sells": "4", "tg_message_id": "",
+        }
+
+    def tearDown(self):
+        for a, v in self._old.items():
+            setattr(cfg, a, v)
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    @staticmethod
+    def _ev(etype, contract, amount, ts, txhash):
+        return {
+            "type": etype, "token_symbol": "TST", "token_name": "Test",
+            "contract": contract, "amount": amount, "timestamp": ts,
+            "hash": txhash, "chain": "ethereum",
+        }
+
+    def test_group_by_type_and_contract(self):
+        c1, c2 = "0xaaa1", "0xaaa2"
+        events = [
+            self._ev("sell", c1, 10, 1000, "0xh1"),
+            self._ev("sell", c1, 5, 2000, "0xh2"),
+            self._ev("buy", c1, 7, 3000, "0xh3"),
+            self._ev("sell", c2, 3, 4000, "0xh4"),
+        ]
+        groups = self.mn.group_whale_events(events)
+        self.assertEqual(len(groups), 3)  # (sell,c1) (buy,c1) (sell,c2)
+        self.assertEqual(len(groups[("sell", c1)]), 2)
+
+    def test_sell_summary_format(self):
+        msg = tg.format_whale_sell_summary(
+            self.whale, "TST", "ethereum", n_sells=3, total_amount=150.0,
+            price=0.5, profit_pct=12.5, first_ts=1700000000, last_ts=1700003600,
+        )
+        self.assertIn("3 تراکنش", msg)
+        self.assertIn("150.00", msg)
+        self.assertIn("$75", msg)          # 150 * 0.5
+        self.assertIn("+12.5%", msg)
+        self.assertIn("#WhaleSell", msg)
+        self.assertIn("#w11111111", msg)   # wallet trace tag
+        self.assertIn("$TST", msg)
+
+    def test_buy_summary_format(self):
+        msg = tg.format_whale_buy_summary(
+            self.whale, "TST", "ethereum", n_buys=2, total_amount=10.0,
+            price=2.0, first_ts=1700000000, last_ts=1700003600,
+        )
+        self.assertIn("2 تراکنش", msg)
+        self.assertIn("$20", msg)
+        self.assertIn("#WhaleBuy", msg)
+
+    def test_aggregated_flow_one_message_per_group(self):
+        c1 = "0xtoken1111"
+        events = [
+            self._ev("sell", c1, 10, 1000, "0xh1"),
+            self._ev("sell", c1, 5, 2000, "0xh2"),
+            self._ev("sell", c1, 7, 3000, "0xh3"),
+        ]
+        sent = []
+
+        def fake_send(text, reply_to_message_id=None):
+            sent.append(text)
+            return 100 + len(sent)
+
+        with patch.object(self.mn.tg, "send_message", side_effect=fake_send), \
+             patch.object(self.mn.apis, "get_token_price", return_value=0.5):
+            n = self.mn._process_whale_events_aggregated(
+                self.whale, self.whale["address"], "ethereum", events)
+
+        self.assertEqual(n, 1)                       # ONE message, not 3
+        self.assertEqual(len(sent), 1)
+        self.assertIn("3 تراکنش", sent[0])
+        # all 3 txs still recorded individually in whale_alerts.csv
+        alerts = db.read_csv(cfg.ALERTS_FILE, db.alert_headers())
+        self.assertEqual(len(alerts), 3)
+        self.assertEqual({a["tx_hash"] for a in alerts}, {"0xh1", "0xh2", "0xh3"})
+        # message id remembered on the wallet row for threading
+        w = db.get_wallet(self.whale["address"])
+        self.assertEqual(w["tg_message_id"], "101")
+
+    def test_buy_group_creates_single_trade(self):
+        c1 = "0xtoken2222"
+        events = [
+            self._ev("buy", c1, 10, 1000, "0xb1"),
+            self._ev("buy", c1, 4, 2000, "0xb2"),
+        ]
+        with patch.object(self.mn.tg, "send_message", return_value=1), \
+             patch.object(self.mn.apis, "get_token_price", return_value=0.1):
+            n = self.mn._process_whale_events_aggregated(
+                self.whale, self.whale["address"], "ethereum", events)
+        self.assertEqual(n, 1)
+        trades = db.read_csv(cfg.TRADES_FILE, db.trade_headers())
+        self.assertEqual(len(trades), 1)             # deduped by add_trade
+        self.assertEqual(trades[0]["token"], "TST")
+
+    def test_tg_state_roundtrip(self):
+        import telegram_utils as tgmod
+        old_file = tgmod._TG_STATE_FILE
+        tgmod._TG_STATE_FILE = os.path.join(self.tmp, "tg_state.json")
+        try:
+            self.assertIsNone(tgmod.get_last_message_id("k"))
+            tgmod.set_last_message_id("k", 987)
+            self.assertEqual(tgmod.get_last_message_id("k"), 987)
+        finally:
+            tgmod._TG_STATE_FILE = old_file
 
 
 def run_all():

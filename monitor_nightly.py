@@ -297,8 +297,153 @@ def _remember_message(row: Dict[str, Any], mid: Optional[int]) -> None:
         db.upsert_whale({"address": addr, "tg_message_id": str(mid)})
 
 
+def group_whale_events(events: List[Dict]) -> Dict[tuple, List[Dict]]:
+    """
+    Group buy/sell events by (type, contract) so each token gets ONE summary
+    message per run instead of one message per transaction.
+    """
+    groups: Dict[tuple, List[Dict]] = {}
+    for ev in events:
+        etype = ev.get("type") or ""
+        contract = (ev.get("contract") or "").lower()
+        groups.setdefault((etype, contract), []).append(ev)
+    return groups
+
+
+def _open_trade_profit(addr: str, contract: str, price: float) -> Optional[float]:
+    """Estimated profit % vs the recorded buy price of the open trade, if any."""
+    if price <= 0:
+        return None
+    for t in db.get_open_trades():
+        if (t.get("wallet_address") or "").lower() != addr:
+            continue
+        if (t.get("contract") or "").lower() != (contract or "").lower():
+            continue
+        try:
+            bp = float(t.get("buy_price") or 0)
+            if bp > 0:
+                return ((price - bp) / bp) * 100.0
+        except Exception:
+            pass
+        break
+    return None
+
+
+def _process_whale_events_aggregated(
+    w: Dict, addr: str, chain: str, events: List[Dict],
+) -> int:
+    """
+    Aggregated mode: ONE Telegram message per (token, buy|sell) group.
+    Every tx is still recorded in whale_alerts.csv (dedupe stays per tx_hash),
+    only the individual messages are suppressed.
+    """
+    alerted = 0
+    for (etype, contract), group in group_whale_events(events).items():
+        ev0 = group[0]
+        token = ev0.get("token_symbol", "?")
+        total_amount = sum(float(e.get("amount") or 0) for e in group)
+        first_ts = min(int(e.get("timestamp") or 0) for e in group)
+        last_ts = max(int(e.get("timestamp") or 0) for e in group)
+
+        price = 0.0
+        if contract:
+            p = apis.get_token_price(contract, chain)
+            if p:
+                price = p
+
+        for e in group:
+            db.add_alert(
+                etype, addr, e.get("token_symbol", ""), contract,
+                chain, e.get("amount", 0), price, e.get("hash", ""),
+                notes="aggregated",
+            )
+
+        if etype == "buy":
+            db.add_trade(
+                wallet_address=addr,
+                token_info={
+                    "symbol": token,
+                    "name": ev0.get("token_name", "?"),
+                    "contract": contract,
+                },
+                price=price or 0.0,
+                chain=chain,
+            )
+            msg = tg.format_whale_buy_summary(
+                w, token, chain, len(group), total_amount,
+                price=price, first_ts=first_ts, last_ts=last_ts,
+            )
+        else:  # sell
+            profit = _open_trade_profit(addr, contract, price)
+            msg = tg.format_whale_sell_summary(
+                w, token, chain, len(group), total_amount,
+                price=price, profit_pct=profit,
+                first_ts=first_ts, last_ts=last_ts,
+            )
+
+        mid = tg.send_message(msg, reply_to_message_id=_reply_to_source(w))
+        _remember_message(w, mid)
+        alerted += 1
+        time.sleep(2.0)
+    return alerted
+
+
+def _process_whale_events_individual(
+    w: Dict, addr: str, chain: str, events: List[Dict],
+) -> int:
+    """Legacy mode: one Telegram message per event."""
+    alerted = 0
+    for ev in events:
+        price = 0.0
+        if ev.get("contract"):
+            p = apis.get_token_price(ev["contract"], chain)
+            if p:
+                price = p
+
+        if ev["type"] == "buy":
+            msg = tg.format_whale_buy(w, ev, price=price)
+            mid = tg.send_message(msg, reply_to_message_id=_reply_to_source(w))
+            _remember_message(w, mid)
+            db.add_alert(
+                "buy", addr, ev.get("token_symbol", ""), ev.get("contract", ""),
+                chain, ev.get("amount", 0), price, ev.get("hash", ""),
+                notes="whale buy",
+            )
+            db.add_trade(
+                wallet_address=addr,
+                token_info={
+                    "symbol": ev.get("token_symbol", "?"),
+                    "name": ev.get("token_name", "?"),
+                    "contract": ev.get("contract", ""),
+                },
+                price=price or 0.0,
+                chain=chain,
+            )
+            alerted += 1
+            time.sleep(2.0)
+
+        elif ev["type"] == "sell":
+            profit = _open_trade_profit(addr, (ev.get("contract") or "").lower(), price)
+            msg = tg.format_whale_sell(w, ev, price=price, profit_pct=profit)
+            mid = tg.send_message(msg, reply_to_message_id=_reply_to_source(w))
+            _remember_message(w, mid)
+            db.add_alert(
+                "sell", addr, ev.get("token_symbol", ""), ev.get("contract", ""),
+                chain, ev.get("amount", 0), price, ev.get("hash", ""),
+                notes=f"profit={profit}",
+            )
+            alerted += 1
+            time.sleep(2.0)
+    return alerted
+
+
 def monitor_whales() -> int:
-    """Scan active whales for recent buy/sell and alert."""
+    """Scan active whales for recent buy/sell and alert.
+
+    The scan window is exactly [last_checked → now] (clamped to
+    WHALE_LOOKBACK_HOURS for whales not seen recently), i.e. only events
+    between the previous run and this one.
+    """
     whales = db.get_whales()
     active = [w for w in whales if (w.get("status") or "active") == "active"]
     active = active[: cfg.WHALE_MONITOR_MAX]
@@ -310,7 +455,10 @@ def monitor_whales() -> int:
     default_since = int((now - timedelta(hours=cfg.WHALE_LOOKBACK_HOURS)).timestamp())
     events_alerted = 0
 
-    logger.info("Monitoring %d whales…", len(active))
+    aggregate = getattr(cfg, "WHALE_AGGREGATE_EVENTS", True)
+    logger.info("Monitoring %d whales (mode=%s)…", len(active),
+                "aggregated" if aggregate else "individual")
+
     for w in active:
         addr = (w.get("address") or "").lower()
         chain = (w.get("chain") or "ethereum").lower()
@@ -325,68 +473,20 @@ def monitor_whales() -> int:
         since_ts = max(since_ts, default_since)
 
         events = apis.parse_whale_activity(addr, chain, since_ts)
-        for ev in events:
-            if db.alert_exists(addr, ev.get("hash") or ""):
-                continue
-
-            price = 0.0
-            if ev.get("contract"):
-                p = apis.get_token_price(ev["contract"], chain)
-                if p:
-                    price = p
-
-            if ev["type"] == "buy":
-                msg = tg.format_whale_buy(w, ev, price=price)
-                mid = tg.send_message(msg, reply_to_message_id=_reply_to_source(w))
-                _remember_message(w, mid)
-                db.add_alert(
-                    "buy", addr, ev.get("token_symbol", ""), ev.get("contract", ""),
-                    chain, ev.get("amount", 0), price, ev.get("hash", ""),
-                    notes="whale buy",
-                )
-                db.add_trade(
-                    wallet_address=addr,
-                    token_info={
-                        "symbol": ev.get("token_symbol", "?"),
-                        "name": ev.get("token_name", "?"),
-                        "contract": ev.get("contract", ""),
-                    },
-                    price=price or 0.0,
-                    chain=chain,
-                )
-                events_alerted += 1
-                time.sleep(2.0)
-
-            elif ev["type"] == "sell":
-                profit = None
-                for t in db.get_open_trades():
-                    if (t.get("wallet_address") or "").lower() != addr:
-                        continue
-                    if (t.get("contract") or "").lower() != (ev.get("contract") or "").lower():
-                        continue
-                    try:
-                        bp = float(t.get("buy_price") or 0)
-                        if bp > 0 and price > 0:
-                            profit = ((price - bp) / bp) * 100.0
-                    except Exception:
-                        pass
-                    break
-
-                msg = tg.format_whale_sell(w, ev, price=price, profit_pct=profit)
-                mid = tg.send_message(msg, reply_to_message_id=_reply_to_source(w))
-                _remember_message(w, mid)
-                db.add_alert(
-                    "sell", addr, ev.get("token_symbol", ""), ev.get("contract", ""),
-                    chain, ev.get("amount", 0), price, ev.get("hash", ""),
-                    notes=f"profit={profit}",
-                )
-                events_alerted += 1
-                time.sleep(2.0)
+        new_events = [
+            ev for ev in events
+            if not db.alert_exists(addr, ev.get("hash") or "")
+        ]
+        if new_events:
+            if aggregate:
+                events_alerted += _process_whale_events_aggregated(w, addr, chain, new_events)
+            else:
+                events_alerted += _process_whale_events_individual(w, addr, chain, new_events)
 
         db.update_whale_last_checked(addr)
         time.sleep(0.3)
 
-    logger.info("Whale events alerted: %d", events_alerted)
+    logger.info("Whale alert messages sent: %d", events_alerted)
     return events_alerted
 
 

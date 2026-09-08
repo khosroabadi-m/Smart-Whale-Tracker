@@ -20,6 +20,48 @@ Each change bumps exactly ONE number and resets the lower ones to 0.
 
 ---
 
+## [2.11.0] — 2026-09-08
+
+### Added — aggregated whale event alerts (huge noise reduction)
+
+A very active whale used to generate one Telegram message per transaction —
+in one run a single whale produced 47 separate "whale sold WETH" messages.
+
+- Whale buy/sell events are now **aggregated per (token, buy|sell) per run**:
+  one summary message like "whale X sold WETH 47 times — total 12,345 tokens
+  (~$39.5k), 01:35→04:40 UTC" instead of dozens of individual alerts.
+  Measured effect on the Sep 7 data: 367 sell messages → 14.
+- The summary window is exactly **between the previous run and this run**
+  (last_checked → now, clamped to WHALE_LOOKBACK_HOURS) and is displayed in
+  the message (`بازه: از HH:MM تا HH:MM UTC`).
+- Every transaction is still recorded individually in `whale_alerts.csv`
+  (per-tx dedupe unchanged); only the individual Telegram messages are
+  suppressed. Profit estimate for sells still uses the open trade's buy price.
+- Each summary message still replies to the whale's previous message and
+  carries the trace hashtag footer (`#WhaleSell #SellSummary $WETH #w…`).
+- Toggle back to one-message-per-tx with `WHALE_AGGREGATE_EVENTS = False`
+  in config.py (default: True).
+- New `format_whale_sell_summary` / `format_whale_buy_summary` templates and
+  6 new tests (grouping, both templates, alert/trade recording, tg state).
+
+### Fixed — detail logs disappearing from data/logs
+
+`nightly_<run_id>.log` detail files were repeatedly missing from `data/logs`:
+
+- **Root cause 1:** all data paths were CWD-relative (`DATA_DIR = "data"`), so
+  jobs launched from another working directory wrote logs (and would write
+  CSVs) somewhere else entirely.
+- **Fix:** `DATA_DIR` is now anchored to the project directory
+  (`os.path.dirname(os.path.abspath(__file__))`) — verified by writing a log
+  from `C:\Windows\Temp` as CWD; the file landed in `<project>/data/logs`.
+- **Root cause 2:** manual git operations (`git clean`, reset/checkout) were
+  wiping untracked `data/logs/*.log` — `.gitignore` (which had been deleted
+  from the working tree) was restored and stray `__pycache__` commits were
+  cleaned up. Nightly detail files are now also excluded from accidental
+  tracking via `data/logs/*`.
+
+---
+
 ## [2.10.0] — 2026-09-07
 
 ### Added — Telegram threads & traceability

@@ -382,6 +382,113 @@ def format_whale_sell(whale: Dict, event: Dict, price: float = 0.0, profit_pct: 
     return "\n".join(lines)
 
 
+def format_whale_sell_summary(
+    whale: Dict,
+    token: str,
+    chain: str,
+    n_sells: int,
+    total_amount: float,
+    price: float = 0.0,
+    profit_pct: Optional[float] = None,
+    first_ts: int = 0,
+    last_ts: int = 0,
+) -> str:
+    """One message summarizing ALL sell events of a whale for one token in this run."""
+    addr = whale.get("address") or ""
+
+    def _t(ts) -> str:
+        try:
+            return datetime.fromtimestamp(int(ts), tz=timezone.utc).strftime("%H:%M")
+        except Exception:
+            return "?"
+
+    span = f"از {_t(first_ts)} تا {_t(last_ts)} UTC" if first_ts and last_ts else "در این دوره"
+
+    lines = [
+        f"🐋🔴 ✦ *خلاصه فروش نهنگ* ✦ ({n_sells} تراکنش)",
+        "🏷 #WhaleSell #SellSummary",
+        "",
+        "━━━━━━━━━━━━━━━━━━━━━",
+        f"▫️ آدرس: `{_short(addr)}`",
+        f"▫️ امتیاز: {whale.get('score', '?')} 🏅 | WinRate: {whale.get('win_rate', '?')}%",
+        "",
+        f"💸 *توکن:* *${token}*",
+        f"▫️ شبکه: `{chain}`",
+        f"▫️ تعداد فروش: *{n_sells}*",
+        f"▫️ مجموع فروش: `{total_amount:,.2f}` توکن",
+    ]
+    if price > 0:
+        lines.append(f"▫️ قیمت فعلی: `${price:.8g}`")
+        total_usd = total_amount * price
+        if total_usd > 0:
+            lines.append(f"▫️ ارزش تقریبی مجموع: *${total_usd:,.0f}* 💵")
+    if profit_pct is not None:
+        sign = "+" if profit_pct >= 0 else ""
+        emoji = "📈" if profit_pct >= 0 else "📉"
+        lines.append(f"▫️ سود/ضرر تخمینی: *{sign}{profit_pct:.1f}%* {emoji}")
+    lines += [
+        f"▫️ بازه: {span}",
+        "",
+        "━━━━━━━━━━━━━━━━━━━━━",
+        "🎯 *اقدام پیشنهادی:* بررسی خروج از پوزیشن هم‌جهت با نهنگ.",
+        "",
+    ]
+    lines.append(_trace(addr=addr, chain=chain, symbol=token, extra=["#WhaleSell", "#SellSummary"]))
+    lines.append(f"⏰ {_now()}")
+    return "\n".join(lines)
+
+
+def format_whale_buy_summary(
+    whale: Dict,
+    token: str,
+    chain: str,
+    n_buys: int,
+    total_amount: float,
+    price: float = 0.0,
+    first_ts: int = 0,
+    last_ts: int = 0,
+) -> str:
+    """One message summarizing ALL buy events of a whale for one token in this run."""
+    addr = whale.get("address") or ""
+
+    def _t(ts) -> str:
+        try:
+            return datetime.fromtimestamp(int(ts), tz=timezone.utc).strftime("%H:%M")
+        except Exception:
+            return "?"
+
+    span = f"از {_t(first_ts)} تا {_t(last_ts)} UTC" if first_ts and last_ts else "در این دوره"
+
+    lines = [
+        f"🐋🟢 ✦ *خلاصه خرید نهنگ* ✦ ({n_buys} تراکنش)",
+        "🏷 #WhaleBuy #BuySummary",
+        "",
+        "━━━━━━━━━━━━━━━━━━━━━",
+        f"▫️ آدرس: `{_short(addr)}`",
+        f"▫️ امتیاز: {whale.get('score', '?')} 🏅 | WinRate: {whale.get('win_rate', '?')}%",
+        "",
+        f"💵 *توکن:* *${token}*",
+        f"▫️ شبکه: `{chain}`",
+        f"▫️ تعداد خرید: *{n_buys}*",
+        f"▫️ مجموع خرید: `{total_amount:,.2f}` توکن",
+    ]
+    if price > 0:
+        lines.append(f"▫️ قیمت فعلی: `${price:.8g}`")
+        total_usd = total_amount * price
+        if total_usd > 0:
+            lines.append(f"▫️ ارزش تقریبی مجموع: *${total_usd:,.0f}* 💵")
+    lines += [
+        f"▫️ بازه: {span}",
+        "",
+        "━━━━━━━━━━━━━━━━━━━━━",
+        "🎯 *اقدام پیشنهادی:* بررسی توکن و در صورت تأیید، ورود هم‌جهت با نهنگ.",
+        "",
+    ]
+    lines.append(_trace(addr=addr, chain=chain, symbol=token, extra=["#WhaleBuy", "#BuySummary"]))
+    lines.append(f"⏰ {_now()}")
+    return "\n".join(lines)
+
+
 def format_whale_candidate(wallet: Dict) -> str:
     """Alert sent when a wallet first reaches 1 verified profitable sell."""
     addr = wallet.get("address", "")

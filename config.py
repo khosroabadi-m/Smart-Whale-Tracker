@@ -20,7 +20,10 @@ CELOSCAN_API_KEY = os.getenv("CELOSCAN_API_KEY", "")
 LINEASCAN_API_KEY = os.getenv("LINEASCAN_API_KEY", "")
 
 # ==================== Paths ====================
-DATA_DIR = "data"
+# Anchored to this file's directory so data/logs land inside the project no
+# matter which working directory the bot/nightly job is launched from.
+_BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+DATA_DIR = os.path.join(_BASE_DIR, "data")
 WALLETS_FILE = os.path.join(DATA_DIR, "wallets.csv")
 TRADES_FILE = os.path.join(DATA_DIR, "trades.csv")
 SELLS_FILE = os.path.join(DATA_DIR, "sells.csv")
@@ -205,6 +208,8 @@ WHALE_CANDIDATE_MIN_PROFIT = 5.0 # min profit % for the qualifying sell
 
 # Whale monitoring
 WHALE_MONITOR_MAX = 40           # max whales to scan per nightly run (rate-limit)
+WHALE_AGGREGATE_EVENTS = True    # summarize buy/sell events per token into ONE
+                                 # message per run (whale sold X n times = 1 msg)
 WHALE_LOOKBACK_HOURS = 36        # how far back to look for new transfers
 WHALE_MIN_TRANSFER_USD = 50.0    # ignore dust buys/sells when pricing available
 SEND_DISCOVERY_SIGNALS = True    # early-buyer signals from bot.py (weaker signals)
